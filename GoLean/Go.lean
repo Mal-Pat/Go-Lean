@@ -18,18 +18,45 @@ def nextTurn : Stone → Stone
   | .B => .W
   | .W => .B
 
+/--
+The Game State, containing the board, next color to move,
+and previous board to check for ko.
+
+`h : 2 ≤ n` is an argument so that `Inhabited GameState n h` can be constructed.
+-/
 structure GameState (n : Nat) (h : 2 ≤ n := by decide) where
   board : Vector (Vector (Option Stone) n) n
   toMove : Stone
   prev_board : Option <| Vector (Vector (Option Stone) n) n
 
 structure Point (n : Nat) where
-  mk ::
   row : Nat
   col : Nat
   row_lt_n : row < n := by decide
   col_lt_n : col < n := by decide
   deriving DecidableEq, Repr
+
+def getOptStone {n} (h : 2 ≤ n := by decide) (gsn : GameState n h) (p : Point n)
+    : Option Stone :=
+  (gsn.board[p.row]'(p.row_lt_n))[p.col]'(p.col_lt_n)
+
+structure StoneGroup {n h} (gsn : GameState n h) where
+  size : Nat
+  group : Vector (Point n) size
+  num_liberties : Nat
+  liberties : Vector (Point n) num_liberties
+  st : Stone
+  valid : ∀ p ∈ group.toArray, getOptStone h gsn p = some st
+
+structure AllStoneGroups {n h} (gsn : GameState n h) where
+  groups : Array <| StoneGroup gsn
+  complete {st} : ∀ p, getOptStone h gsn p = some st →
+                    ∃ gp ∈ groups, ∃ q ∈ gp.group, p = q
+
+def getAllGroups {n h} (gsn : GameState n h) : AllStoneGroups gsn :=
+  sorry
+
+#check Nat.noConfusion
 
 def emptyBoard (n : Nat) : Vector (Vector (Option Stone) n) n :=
   let r : Vector (Option Stone) n :=
@@ -55,10 +82,6 @@ def get_old {n} (h : 2 ≤ n := by decide) (gsn : GameState n h)
   (gsn.board[r]'(by simp))[c]'(by simp)
 
 #eval get_old _ (Inhabited.default : GameState 19) 1 1
-
-def getOptStone {n} (h : 2 ≤ n := by decide) (gsn : GameState n h) (p : Point n)
-    : Option Stone :=
-  (gsn.board[p.row]'(p.row_lt_n))[p.col]'(p.col_lt_n)
 
 def getNeighborPoints {n} (h : 2 ≤ n := by decide) (p : Point n)
     : Vector (Option <| Point n) 4 :=
