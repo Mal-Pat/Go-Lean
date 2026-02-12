@@ -5,107 +5,137 @@ Authors : Malhar A. Patel
 import Lean
 import Mathlib
 
+/-- Stone Type -/
 inductive Stone
   | B
   | W
   deriving DecidableEq, Repr, Inhabited
 
+/-- Prints Stone Color -/
 def printStone : Stone → String
   | .B => "Black"
   | .W => "White"
 
+/-- Next Turn -/
 def nextTurn : Stone → Stone
   | .B => .W
   | .W => .B
 
+/-- Size of board -/
+structure Size where
+  rl : Nat
+  cl : Nat
+  two_le_rl : 2 ≤ rl := by decide
+  two_le_cl : 2 ≤ cl := by decide
+
+/-- Notation for `Size` -/
+notation "s[" rl "," cl "]" => Size.mk rl cl
+
+/-- Board -/
+abbrev Board (s : Size) := Vector (Vector (Option Stone) s.cl) s.rl
+
 /--
 The Game State, containing the board, next color to move,
 and previous board to check for ko.
-
-`h : 2 ≤ n` is an argument so that `Inhabited GameState n h` can be constructed.
 -/
-structure GameState (n : Nat) (h : 2 ≤ n := by decide) where
-  board : Vector (Vector (Option Stone) n) n
+structure GameState (s : Size) where
+  board : Board s
   toMove : Stone
-  prev_board : Option <| Vector (Vector (Option Stone) n) n
+  prev_board : Option <| Board s
 
-structure Point (n : Nat) where
-  row : Nat
-  col : Nat
-  row_lt_n : row < n := by decide
-  col_lt_n : col < n := by decide
+/--
+Point structure which contains `row` and `col`, and
+the proof that both are less than `r.len` and `c.len` respectively
+-/
+structure Point (s : Size) where
+  r : Nat
+  c : Nat
+  r_lt_n : r < s.rl := by decide
+  c_lt_n : c < s.cl := by decide
   deriving DecidableEq, Repr
 
-def getOptStone {n} (h : 2 ≤ n := by decide) (gsn : GameState n h) (p : Point n)
+/-- Notation for `Point` -/
+notation "p[" a "," b "," s "]" => @Point.mk s a b (by decide) (by decide)
+
+def Board.getOptStone {s} (board : Board s) (p : Point s)
     : Option Stone :=
-  (gsn.board[p.row]'(p.row_lt_n))[p.col]'(p.col_lt_n)
+  (board[p.r]'(p.r_lt_n))[p.c]'(p.c_lt_n)
 
-structure StoneGroup {n h} (gsn : GameState n h) where
-  size : Nat
-  group : Vector (Point n) size
-  num_liberties : Nat
-  liberties : Vector (Point n) num_liberties
-  st : Stone
-  valid : ∀ p ∈ group.toArray, getOptStone h gsn p = some st
+-- structure StoneGroup {s} (board : Board s) where
+--   size : Nat
+--   group : Vector (Point n) size
+--   num_liberties : Nat
+--   liberties : Vector (Point n) num_liberties
+--   st : Stone
+--   valid : ∀ p ∈ group.toArray, getOptStone h gsn p = some st
 
-structure AllStoneGroups {n h} (gsn : GameState n h) where
-  groups : Array <| StoneGroup gsn
-  complete {st} : ∀ p, getOptStone h gsn p = some st →
-                    ∃ gp ∈ groups, ∃ q ∈ gp.group, p = q
+-- structure AllStoneGroups {n h} (gsn : GameState n h) where
+--   groups : Array <| StoneGroup gsn
+--   complete {st} : ∀ p, getOptStone h gsn p = some st →
+--                     ∃ gp ∈ groups, ∃ q ∈ gp.group, p = q
 
-def getAllGroups {n h} (gsn : GameState n h) : AllStoneGroups gsn :=
-  sorry
+-- def getAllGroups {n h} (gsn : GameState n h) : AllStoneGroups gsn :=
+--   sorry
 
-#check Nat.noConfusion
+/-- Create an empty board (filled with `none`) of size `s` -/
+def emptyBoard (s : Size) : Board s :=
+  let row : Vector (Option Stone) s.cl :=
+    ⟨Array.replicate s.cl none, by simp⟩
+  ⟨Array.replicate s.rl row, by simp⟩
 
-def emptyBoard (n : Nat) : Vector (Vector (Option Stone) n) n :=
-  let r : Vector (Option Stone) n :=
-    ⟨Array.replicate n none, by simp⟩
-  ⟨Array.replicate n r, by simp⟩
-
-instance {n} {h : 2 ≤ n} : Inhabited (GameState n h) where
+instance {s} : Inhabited (GameState s) where
   default := {
-    board := emptyBoard n,
+    board := emptyBoard s,
     toMove := Stone.B,
     prev_board := none
     }
 
 #check Array.set
 
-#eval (Inhabited.default : GameState 19)
+/-- Default 19 × 19 board size -/
+def dfltSize : Size := Size.mk 19 19
 
-def dflt : GameState 19 :=
-  Inhabited.default
+/-- Default 19 × 19 starting game state -/
+def dfltGameState : GameState dfltSize := Inhabited.default
 
-def get_old {n} (h : 2 ≤ n := by decide) (gsn : GameState n h)
-    (r c : Fin n) : Option Stone :=
-  (gsn.board[r]'(by simp))[c]'(by simp)
-
-#eval get_old _ (Inhabited.default : GameState 19) 1 1
-
-def getNeighborPoints {n} (h : 2 ≤ n := by decide) (p : Point n)
-    : Vector (Option <| Point n) 4 :=
-  let up : Option <| Point n :=
-    if p.row == 0 then none
-    else some ⟨p.row - 1, p.col, by grind [p.row_lt_n], p.col_lt_n⟩
-  let down : Option <| Point n :=
-    if row_eq_n : p.row == n - 1 then none
-    else some ⟨p.row + 1, p.col, by grind [p.row_lt_n], p.col_lt_n⟩
-  let left : Option <| Point n :=
-    if p.col == 0 then none
-    else some ⟨p.row, p.col - 1, p.row_lt_n, by grind[p.col_lt_n]⟩
-  let right : Option <| Point n :=
-    if row_eq_n : p.col == n - 1 then none
-    else some ⟨p.row, p.col + 1, p.row_lt_n, by grind[p.col_lt_n]⟩
+/-- Gets the 4 neighbouring points of a point -/
+def getNbhdPoints {s} (p : Point s)
+    : Vector (Option <| Point s) 4 :=
+  let up : Option <| Point s :=
+    if p.r == 0 then none
+    else some ⟨p.r - 1, p.c, by grind [p.r_lt_n], p.c_lt_n⟩
+  let down : Option <| Point s :=
+    if row_eq_n : p.r == s.rl - 1 then none
+    else some ⟨p.r + 1, p.c, by grind [p.r_lt_n], p.c_lt_n⟩
+  let left : Option <| Point s :=
+    if p.c == 0 then none
+    else some ⟨p.r, p.c - 1, p.r_lt_n, by grind[p.c_lt_n]⟩
+  let right : Option <| Point s :=
+    if row_eq_n : p.c == s.cl - 1 then none
+    else some ⟨p.r, p.c + 1, p.r_lt_n, by grind[p.c_lt_n]⟩
   ⟨#[up, down, left, right], by simp⟩
 
-def playAt {n} {h : 2 ≤ n} (gsn : GameState n h) (p : Point n)
-    : GameState n h :=
-  let board := gsn.board
-  let row := board[p.row]'(p.row_lt_n)
-  let modified_row := row.set p.col (some gsn.toMove) (p.col_lt_n)
-  let modified_board := board.set p.row modified_row p.row_lt_n
-  ⟨modified_board, nextTurn gsn.toMove, some board⟩
+def isValid {s} (gs : GameState s) (p : Point s)
+    : Bool × String :=
+  sorry
+
+def playAt {s} (gs : GameState s) (p : Point s)
+    : Except String <| GameState s :=
+  let board := gs.board
+  let ⟨valid, msg⟩ := isValid gs p
+  -- let valid := true
+  -- let msg := ""
+  if valid then
+    let row := board[p.r]'(p.r_lt_n)
+    let modified_row := row.set p.c (some gs.toMove) (p.c_lt_n)
+    let modified_board := board.set p.r modified_row p.r_lt_n
+    Except.ok ⟨modified_board, nextTurn gs.toMove, some board⟩
+  else
+    Except.error s!"Invalid Move! {msg}"
+
+/-- Pass only changes `toMove`; the board remains the same -/
+def pass {s} (gs : GameState s) : GameState s :=
+  {gs with toMove := nextTurn gs.toMove}
 
 def printOptStone : Option Stone → String
 | some .B => "●"
@@ -115,22 +145,30 @@ def printOptStone : Option Stone → String
 def printRow {n} (vec : Vector (Option Stone) n) : String :=
   String.intercalate "" (vec.map printOptStone).toList
 
-def printBoard {n} (bvec : Vector (Vector (Option Stone) n) n) : String :=
-  String.intercalate "\n" (bvec.map printRow).toList
+def printBoard {s} (board : Board s) : String :=
+  String.intercalate "\n" (board.map printRow).toList
 
-instance {n} {h : 2 ≤ n} : Repr <| GameState n h where
-  reprPrec gsn _ :=
-    let header := "To Move: " ++ printStone gsn.toMove ++ "\n"
-    let brd := printBoard gsn.board
+instance {s} : Repr <| GameState s where
+  reprPrec gs _ :=
+    let header := "To Move: " ++ printStone gs.toMove ++ "\n"
+    let brd := printBoard gs.board
     (header ++ brd).toFormat
 
-#eval (Inhabited.default : GameState 19)
+#eval dfltSize
 
-#eval dflt
+#eval dfltGameState
 
-#eval playAt dflt (.mk 1 0)
+#check Point dfltSize
 
+#eval (@Point.mk (dfltSize) 1 0 (by decide) (by decide))
 
+#check @Point.mk dfltSize 1 0
+
+-- #eval playAt dfltGameState (@Point.mk (dfltSize) 18 4 (by decide) (by decide))
+
+#eval {r := 1, c := 2 : Point (Size.mk 19 19)}
+
+#eval p[1,2,dfltSize]
 
 
 
