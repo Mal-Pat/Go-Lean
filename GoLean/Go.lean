@@ -46,6 +46,7 @@ structure GameState (s : Size) where
   capturedW : Nat
   capturedB : Nat
   msg : String
+  moveNum : Nat
 
 /--
 Point structure which contains `row` and `col`, and
@@ -79,27 +80,27 @@ def Value.getStone? {s} (v : Value s)
   | none => none
   | some color => some ⟨color, v.point⟩
 
-structure Move (s : Size) where
-  color : Color
-  point : Option <| Point s
-
 /-- Create an empty board (filled with `none`) of size `s` -/
-def emptyBoard (s : Size) : Board s :=
+def emptyBoard {s : Size} : Board s :=
   let row : Vector (Option Color) s.cl :=
     ⟨Array.replicate s.cl none, by simp⟩
   ⟨Array.replicate s.rl row, by simp⟩
 
+def defaultMsg : String := "Valid Move"
+
 instance {s} : Inhabited (GameState s) where
   default := {
-    board := emptyBoard s,
+    board := emptyBoard,
     toMove := Color.B,
     prev_board? := none,
     capturedW := 0,
     capturedB := 0,
-    msg := ""
+    msg := defaultMsg,
+    moveNum := 0
     }
 
-#check Array.set
+def startGame {s : Size} : GameState s :=
+  default
 
 /-- Default 19 × 19 board size -/
 def dfltSize : Size := Size.mk 19 19
@@ -421,10 +422,10 @@ def GameState.updateCaptures {s} (gs : GameState s) (captures : Nat)
   | .B => {gs with capturedW := captures + gs.capturedW}
   | .W => {gs with capturedB := captures + gs.capturedB}
 
-def GameState.move {s} (gs : GameState s) (p : Point s)
+def GameState.moveP {s} (gs : GameState s) (p : Point s)
     : GameState s :=
   match gs.board.isEmptyPoint p with
-  | false => {gs with msg := "Illegal: Point not empty!"}
+  | false => {gs with msg := "Error: Point not empty!"}
   | true =>
     match gs.isKo p with
     | true => {gs with msg := "Illegal: Ko!"}
@@ -432,18 +433,77 @@ def GameState.move {s} (gs : GameState s) (p : Point s)
     match gs.board.playCaptures p gs.toMove with
     | Except.error msg => {gs with msg := msg}
     | Except.ok (new_board, captures) =>
-      let new_gs : GameState s :=
-        {gs with board := new_board, toMove := nextTurn gs.toMove, prev_board? := some gs.board}
+      let new_gs := {gs with board       := new_board,
+                             toMove      := nextTurn gs.toMove,
+                             prev_board? := some gs.board,
+                             msg         := defaultMsg,
+                             moveNum     := gs.moveNum + 1}
       new_gs.updateCaptures captures
 
+def GameState.moveN {s} (gs : GameState s) (r c : Nat)
+    : GameState s :=
+  if h1 : r < s.rl then
+    if h2 : c < s.cl then
+      let p := Point.mk r c h1 h2
+      gs.moveP p
+    else
+      {gs with msg := "Error: Move outside board!"}
+  else
+    {gs with msg := "Error: Move outside board!"}
+
+def ltrToNum (ch : Char) : Except String Nat :=
+  let num := ch.toNat
+  if 97 <= num && num <= 122 then
+    .ok <| num - 97
+  else
+    if 65 <= num && num <= 90 then
+      .ok <| num - 65
+    else
+      .error "Error: Invalid Notation!"
+
+def GameState.moveC {s} (gs : GameState s) (r_ch c_ch : Char)
+    : GameState s :=
+  match ltrToNum r_ch with
+  | .error msg => {gs with msg := msg}
+  | .ok r_num  =>
+    match ltrToNum c_ch with
+    | .error msg => {gs with msg := msg}
+    | .ok c_num =>
+      gs.moveN r_num c_num
+
 /-- Pass only changes `toMove`; the board remains the same -/
-def pass {s} (gs : GameState s)
+def GameState.pass {s} (gs : GameState s)
     : GameState s :=
   {gs with toMove := nextTurn gs.toMove}
 
+inductive Place (s : Size) where
+  | num (r : Nat) (c : Nat)
+  | char (r : Char) (c : Char)
+
+inductive Move (s : Size) where
+  | pass
+  | place (pl : Place s)
+
+structure Turn (s : Size) where
+  color : Color
+  move : Move s
+
+def GameState.move {s} (gs : GameState s) (move : Move s)
+    : GameState s :=
+  match move with
+  | .pass     => gs.pass
+  | .place pl =>
+    match pl with
+    | .num r c  => gs.moveN r c
+    | .char r c => gs.moveC r c
+
+def GameState.playGame {s} (gs : GameState s) (moves : List <| Move s)
+    : GameState s :=
+  moves.foldl move gs
+
 def printOptColor : Option Color → String
-| some .B => "●"
-| some .W => "○"
+| some .B => "○"
+| some .W => "●"
 | none =>    "+"
 
 def printRow {n} (vec : Vector (Option Color) n) : String :=
@@ -454,39 +514,67 @@ def printBoard {s} (board : Board s) : String :=
 
 instance {s} : Repr <| GameState s where
   reprPrec gs _ :=
-    let msg :=
-      if gs.msg == "" then
-        ""
-      else
-        gs.msg ++ " "
-    let header := "To Move: " ++ printColor gs.toMove ++ "\n"
+    let moveNum := s!"Move Number: {gs.moveNum}\n"
+    let toMove := s!"To Move: {printColor gs.toMove}\n"
+    let msg := s!"Messages: {gs.msg}\n"
     let captures := s!"Captures: B = {gs.capturedB}, W = {gs.capturedW}\n"
     let brd := printBoard gs.board
-    (msg ++ header ++ captures ++ brd).toFormat
+    (moveNum ++ toMove ++ msg ++ captures ++ brd).toFormat
 
-#eval dfltSize
 
-#eval dfltGameState
 
-#check Point dfltSize
-
-#eval (@Point.mk (dfltSize) 1 0 (by decide) (by decide))
-
-#check @Point.mk dfltSize 1 0
-
--- #eval playAt dfltGameState (@Point.mk (dfltSize) 18 4 (by decide) (by decide))
-
-#eval {r := 1, c := 2 : Point (Size.mk 19 19)}
-
-#eval p[1,2,dfltSize]
-
-def game : GameState s[19,19] :=
+def game0 : GameState s[19,19] :=
   let s := s[19,19]
-  dfltGameState.move p[0,0,s]
-  |>.move p[1,0,s]
-  |>.move p[0,1,s]
-  |>.move p[1,1,s]
-  |>.move p[3,3,s]
-  |>.move p[0,2,s]
+  dfltGameState.moveP p[0,0,s]
+  |>.moveP p[1,0,s]
+  |>.moveP p[0,1,s]
+  |>.moveP p[1,1,s]
+  |>.moveP p[3,3,s]
+  |>.moveP p[0,2,s]
 
-#eval game
+def game1 : GameState s[19,19] :=
+  let s := s[19,19]
+  dfltGameState.moveN 0 0
+  |>.moveN 1 0
+  |>.moveN 0 1
+  |>.moveN 1 1
+  |>.moveN 3 3
+  |>.moveN 0 2
+
+#eval game1
+
+def game2 : GameState s[19,19] :=
+  let s := s[19,19]
+  dfltGameState.moveP p[0,0,s]
+  |>.moveP p[3,4,s]
+  |>.moveP p[4,4,s]
+  |>.moveP p[0,1,s]
+  |>.moveP p[5,5,s]
+  |>.moveP p[1,0,s]
+
+def game3 : GameState s[19,19] :=
+  let s := s[19,19]
+  dfltGameState.moveN 0 0
+  |>.moveN 3 4
+  |>.moveN 4 4
+  |>.moveN 0 1
+  |>.moveN 5 5
+  |>.moveN 1 0
+
+#eval game3
+
+notation "n[" r "," c "]" => Move.place <| Place.num r c
+notation "pass" => Move.pass
+notation "c[" r "," c "]" => Move.place <| Place.char r c
+
+open GameState Move Place
+
+def game4 : GameState s[19,19] :=
+  startGame.playGame [place <| num 1 1]
+
+#eval game4
+
+def game5 : GameState s[19,19] :=
+  startGame.playGame [ n[1,1], n[3,4], c['a','b'] ]
+
+#eval game5
