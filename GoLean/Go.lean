@@ -4,13 +4,13 @@ Authors : Malhar A. Patel
 
 import Lean
 
-/-- Color Type -/
+/-- `Color` Type -/
 inductive Color
   | B
   | W
   deriving DecidableEq, Repr, Inhabited
 
-/-- Prints Color Color -/
+/-- Prints `Color`'s color -/
 def printColor : Color → String
   | .B => "Black"
   | .W => "White"
@@ -20,6 +20,7 @@ def nextTurn : Color → Color
   | .B => .W
   | .W => .B
 
+/-- Opposite color -/
 abbrev oppColor := nextTurn
 
 /-- Size of board -/
@@ -32,12 +33,15 @@ structure Size where
 /-- Notation for `Size` -/
 notation "s[" rl "," cl "]" => Size.mk rl cl
 
-/-- Board -/
+/-- `Board` -/
 abbrev Board (s : Size) := Vector (Vector (Option Color) s.cl) s.rl
+
+def defaultSize : Size := s[19,19]
 
 /--
 The Game State, containing the board, next color to move,
-and previous board to check for ko.
+previous board to check for ko, number of captured pieces,
+the move number and any messages for the players.
 -/
 structure GameState (s : Size) where
   board : Board s
@@ -45,12 +49,12 @@ structure GameState (s : Size) where
   prev_board? : Option <| Board s
   capturedW : Nat
   capturedB : Nat
-  msg : String
   moveNum : Nat
+  msg : String
 
 /--
-Point structure which contains `row` and `col`, and
-the proof that both are less than `r.len` and `c.len` respectively
+`Point` specifies a point by row and column, and
+the proof that both are less than `s.rl` and `s.cl` respectively
 -/
 structure Point (s : Size) where
   r : Nat
@@ -62,32 +66,39 @@ structure Point (s : Size) where
 /-- Notation for `Point` -/
 notation "p[" a "," b "," s "]" => @Point.mk s a b (by decide) (by decide)
 
+/-- `Value` contains a `Point` and an `Option Color` -/
 structure Value (s : Size) where
   color? : Option Color
   point : Point s
 
+/-- `Stone` contains a `Point` and a `Color` -/
 structure Stone (s : Size) where
   color : Color
   point : Point s
 
+/-- Get the value of a stone -/
 def Stone.getValue {s} (st : Stone s)
     : Value s :=
   ⟨some st.color, st.point⟩
 
+/-- Get (opt) stone from a value -/
 def Value.getStone? {s} (v : Value s)
     : Option <| Stone s :=
   match v.color? with
   | none => none
   | some color => some ⟨color, v.point⟩
 
-/-- Create an empty board (filled with `none`) of size `s` -/
+/-- Create an empty board (filled with `none`)
+    (size will be inferred from context) -/
 def emptyBoard {s : Size} : Board s :=
   let row : Vector (Option Color) s.cl :=
     ⟨Array.replicate s.cl none, by simp⟩
   ⟨Array.replicate s.rl row, by simp⟩
 
+/-- Default Message to display -/
 def defaultMsg : String := "Valid Move"
 
+/-- Inhabited GameState -/
 instance {s} : Inhabited (GameState s) where
   default := {
     board := emptyBoard,
@@ -95,105 +106,109 @@ instance {s} : Inhabited (GameState s) where
     prev_board? := none,
     capturedW := 0,
     capturedB := 0,
-    msg := defaultMsg,
-    moveNum := 0
+    moveNum := 0,
+    msg := defaultMsg
     }
 
+/-- Create a `GameState` with an empty board and black to start
+    (size will be inferred from context) -/
 def startGame {s : Size} : GameState s :=
   default
-
-/-- Default 19 × 19 board size -/
-def dfltSize : Size := Size.mk 19 19
-
-/-- Default 19 × 19 starting game state -/
-def dfltGameState : GameState dfltSize := Inhabited.default
 
 abbrev PointsArr (s : Size) := Array <| Point s
 abbrev PointsList (s : Size) := List <| Point s
 abbrev ValuesArr (s : Size) := Array <| Value s
 abbrev StonesArr (s : Size) := Array <| Stone s
 
-/-- Get some color or none at point `p` on `board` -/
+/-- Get some color or none at a point on board -/
 def Board.getColorAt? {s} (board : Board s) (p : Point s)
     : Option Color :=
   (board[p.r]'(p.r_lt_n))[p.c]'(p.c_lt_n)
 
-/-- Check if `p` is empty -/
+/-- Check if a point on board is empty -/
 def Board.isEmptyPoint {s} (board : Board s) (p : Point s)
     : Bool :=
   match board.getColorAt? p with
   | none => true
   | some _ => false
 
+/-- Get value at a point on board -/
 def Board.getValueAt {s} (board : Board s) (p : Point s)
     : Value s :=
   ⟨board.getColorAt? p, p⟩
 
+/-- Get (opt) stone at a point on board -/
 def Board.getStoneAt? {s} (board : Board s) (p : Point s)
     : Option <| Stone s :=
   match board.getColorAt? p with
   | none => none
   | some color => some ⟨color, p⟩
 
+/-- Get values at points on board -/
 def Board.getValuesAt {s} (board : Board s) (parr : PointsArr s)
     : ValuesArr s :=
   parr.map fun p => board.getValueAt p
 
+/-- Get (opt) stones at points on board -/
 def Board.getStonesAt? {s} (board : Board s) (parr : PointsArr s)
     : Option <| StonesArr s :=
   parr.mapM fun p => board.getStoneAt? p -- Ensure that this works correctly
 
+/-- Get points from stones -/
 def StonesArr.getPointsFrom {s} (starr : StonesArr s) -- Ensure that `StonesArr.` works
     : PointsArr s :=
   starr.map fun st => st.point
 
+/-- Get points from values -/
 def ValuesArr.getPointsFrom {s} (varr : ValuesArr s)
     : PointsArr s :=
   varr.map fun v => v.point
 
+/-- Convert array of values to array of stones -/
 def ValuesArr.toStoneArr {s} (varr : ValuesArr s)
     : StonesArr s :=
   varr.filterMap Value.getStone?
 
+/-- Filter an array of stones w.r.t a color -/
 def StonesArr.filterColor {s} (starr : StonesArr s) (color : Color)
     : StonesArr s :=
   starr.filter (fun st => st.color == color)
 
-/-- Check if all `points` have same `value` -/
-def Board.checkSame {s} (board : Board s) (value : Option Color) (points : PointsList s)
+/-- Check if all points have same (opt) color -/
+def Board.checkSame {s} (board : Board s) (color? : Option Color) (points : PointsList s)
     : Bool :=
   match points with
   | [] => true
   | p :: rest =>
-    if board.getColorAt? p == value then
-      board.checkSame value rest
+    if board.getColorAt? p == color? then
+      board.checkSame color? rest
     else
       false
 
+/-- A group of points with same (opt) color -/
 structure ValueGroup (s : Size) where
-  value : Option Color
+  color? : Option Color
   points : PointsArr s
   liberties : PointsArr s
   deriving Repr, DecidableEq
 
-/-- Check if ValueGroup `vg` is valid on `board`,
-    that is, every point in `vg` must have same value -/
+/-- Check if a ValueGroup is valid on board,
+    that is, every point in the ValueGroup must have same (opt) color -/
 def ValueGroup.check {s} (vg : ValueGroup s) (board : Board s)
     : Bool :=
-  board.checkSame vg.value vg.points.toList
+  board.checkSame vg.color? vg.points.toList
 
-/-- Get number of liberties of a ValueGroup `vg` -/
+/-- Get number of liberties of a ValueGroup -/
 def ValueGroup.getNumLibs {s} (vg : ValueGroup s)
     : Nat :=
   vg.liberties.size
 
+/-- A group of stones with same color -/
 structure StoneGroup (s : Size) where
   color : Color
   points : PointsArr s
   liberties : PointsArr s
   deriving Repr, DecidableEq
-
-#eval List.Perm [1,2,6,3] [6,2,3,1]
 
 /-- Check if two StoneGroups are equal -/
 def StoneGroup.isEqualTo {s} (stg1 stg2 : StoneGroup s)
@@ -204,8 +219,6 @@ def StoneGroup.isEqualTo {s} (stg1 stg2 : StoneGroup s)
 
 abbrev StoneGroupsArr (s : Size) := Array <| StoneGroup s
 abbrev StoneGroupsList (s : Size) := List <| StoneGroup s
-
-#check Array.foldl
 
 /-- Check if a list of StoneGroups contains a particular StoneGroup -/
 def StoneGroupsList.contains {s} (stgl : StoneGroupsList s) (target_stg : StoneGroup s)
@@ -226,36 +239,39 @@ def StoneGroupsArr.deldups {s} (stgarr : StoneGroupsArr s)
     []
   unqstgl.toArray
 
+/-- Check if a StoneGroup is valid -/
 def StoneGroup.check {s} (stg : StoneGroup s) (board : Board s)
     : Bool :=
   board.checkSame stg.color stg.points.toList
 
-/-- Get number of liberties of a StoneGroup `stg` -/
+/-- Get number of liberties of a StoneGroup -/
 def StoneGroup.getNumLibs {s} (stg : StoneGroup s)
     : Nat :=
   stg.liberties.size
 
+/-- Get size of a StoneGroup (number of stones in it) -/
 def StoneGroup.size {s} (stg : StoneGroup s)
     : Nat :=
   stg.points.size
 
+/-- Get number of stones in total among an array of StoneGroups -/
 def StoneGroupsArr.totalSize {s} (stgarr : StoneGroupsArr s)
     : Nat :=
   stgarr.foldl (fun n stg => n + stg.size) 0
 
-/-- Convert a `ValueGroup` to a `StoneGroup` if possible -/
+/-- Convert a ValueGroup to a StoneGroup if possible -/
 def ValueGroup.getStoneGroup? {s} (vg : ValueGroup s)
     : Option <| StoneGroup s :=
-  match vg.value with
+  match vg.color? with
   | none => none
   | some color => some ⟨color, vg.points, vg.liberties⟩
 
-/-- Convert a `StoneGroup` to a `ValueGroup` -/
+/-- Convert a StoneGroup to a ValueGroup -/
 def StoneGroup.getValueGroup {s} (stg : StoneGroup s)
     : ValueGroup s :=
   ⟨some stg.color, stg.points, stg.liberties⟩
 
-/-- Get the neighboring points of point `p` -/
+/-- Get the neighboring points of a point -/
 def Point.getNbhdPoints {s} (p : Point s)
     : PointsArr s :=
   let up : Option <| Point s :=
@@ -273,12 +289,13 @@ def Point.getNbhdPoints {s} (p : Point s)
   #[up, down, left, right].filterMap id
   -- or #[up, down, left, right].filter fun p => (p != none)
 
-/-- Get the neighboring stones of point `p` on `board` -/
+/-- Get the neighboring values of a point on board -/
 def Board.getNbhdValuesAt {s} (board : Board s) (p : Point s)
     : ValuesArr s :=
   let nbhdpoints := p.getNbhdPoints
   board.getValuesAt nbhdpoints
 
+/-- Get the neighboring stones of a point on board -/
 def Board.getNbhdStonesAt {s} (board : Board s) (p : Point s)
     : StonesArr s :=
   let nbhdValues := board.getNbhdValuesAt p
@@ -288,32 +305,45 @@ def Board.getNbhdStonesAt {s} (board : Board s) (p : Point s)
 def deldups {α} [DecidableEq α] (l : List α) : List α :=
   l.foldl (fun unql a => if a ∈ unql then unql else a :: unql) []
 
-partial def floodFill {s} (board : Board s) (queue : PointsList s)
+def floodFillHelper {s} (board : Board s) (queue : PointsList s)
   (visited : PointsList s) (liberties : PointsList s) (empty : Bool)
+  (fuel : Nat) -- Add fuel parameter
     : (PointsList s) × (PointsList s) :=
-  match queue with
-  | [] =>
-    let uniqueLibs := deldups liberties
-    (visited, uniqueLibs)
-  | cur :: rest =>
-    if cur ∈ visited then
-      floodFill board rest visited liberties empty
-    else
-      let nbhdPoints := cur.getNbhdPoints
-      let (same, diff) := nbhdPoints.partition
-        fun p => (board.getColorAt? cur == board.getColorAt? p)
-      let libs :=
-        if empty then
-          diff
-        else
-          diff.filter fun p => (board.getColorAt? p == none)
-      floodFill board (rest ++ same.toList) (cur :: visited) (liberties ++ libs.toList) empty
+  -- Termination proof: fuel is a Nat that strictly decreases in every branch
+  match fuel with
+  | 0 => (visited, deldups liberties) -- Out of fuel: return what we have
+  | f + 1 =>
+    match queue with
+    | [] =>
+      let uniqueLibs := deldups liberties
+      (visited, uniqueLibs)
+    | cur :: rest =>
+      if cur ∈ visited then
+        -- Recursion: f < f + 1
+        floodFillHelper board rest visited liberties empty f
+      else
+        let nbhdPoints := cur.getNbhdPoints
+        let (same, diff) := nbhdPoints.partition
+          fun p => (board.getColorAt? cur == board.getColorAt? p)
+        let libs :=
+          if empty then
+            diff
+          else
+            diff.filter fun p => (board.getColorAt? p == none)
+        -- Recursion: f < f + 1
+        floodFillHelper board (rest ++ same.toList) (cur :: visited) (liberties ++ libs.toList) empty f
+
+/-- The floodfill algorithm -/
+def floodFill {s} (board : Board s) (point : Point s) (empty : Bool)
+    : (PointsList s) × (PointsList s) :=
+  let fuel := (s.rl * s.cl) + 1
+  floodFillHelper board [point] [] [] empty fuel
 
 /-- Get the ValueGroup at point `p` on `board` -/
 def Board.getValueGroupAt {s} (board : Board s) (p : Point s)
     : ValueGroup s :=
   let empty := board.isEmptyPoint p
-  let (points, liberties) := floodFill board [p] [] [] empty
+  let (points, liberties) := floodFill board p empty
   -- maybe add check for ValueGroup here
   ⟨board.getColorAt? p, points.toArray, liberties.toArray⟩
 
@@ -327,7 +357,7 @@ def Board.getStoneGroupAt? {s} (board : Board s) (p : Point s)
 /-- Get the StoneGroup from stone `st` on `board` -/
 def Board.getStoneGroupFrom {s} (board : Board s) (st : Stone s)
     : StoneGroup s :=
-  let (points, liberties) := floodFill board [st.point] [] [] false
+  let (points, liberties) := floodFill board st.point false
   ⟨st.color, points.toArray, liberties.toArray⟩
 
 def Board.getStoneGroupsFrom {s} (board : Board s) (starr : StonesArr s)
@@ -433,11 +463,12 @@ def GameState.moveP {s} (gs : GameState s) (p : Point s)
     match gs.board.playCaptures p gs.toMove with
     | Except.error msg => {gs with msg := msg}
     | Except.ok (new_board, captures) =>
-      let new_gs := {gs with board       := new_board,
-                             toMove      := nextTurn gs.toMove,
-                             prev_board? := some gs.board,
-                             msg         := defaultMsg,
-                             moveNum     := gs.moveNum + 1}
+      let new_gs :=
+        {gs with board       := new_board,
+                 toMove      := nextTurn gs.toMove,
+                 prev_board? := some gs.board,
+                 msg         := defaultMsg,
+                 moveNum     := gs.moveNum + 1}
       new_gs.updateCaptures captures
 
 def GameState.moveN {s} (gs : GameState s) (r c : Nat)
@@ -512,69 +543,20 @@ def printRow {n} (vec : Vector (Option Color) n) : String :=
 def printBoard {s} (board : Board s) : String :=
   String.intercalate "\n" (board.map printRow).toList
 
+def printGameState {s} (gs : GameState s) : String :=
+  let moveNum := s!"Move Number: {gs.moveNum}\n"
+  let toMove := s!"To Move: {printColor gs.toMove}\n"
+  let msg := s!"Messages: {gs.msg}\n"
+  let captures := s!"Captures: B = {gs.capturedB}, W = {gs.capturedW}\n"
+  let brd := printBoard gs.board
+  moveNum ++ toMove ++ msg ++ captures ++ brd
+
+instance {s} : ToString <| GameState s where
+  toString gs := printGameState gs
+
 instance {s} : Repr <| GameState s where
-  reprPrec gs _ :=
-    let moveNum := s!"Move Number: {gs.moveNum}\n"
-    let toMove := s!"To Move: {printColor gs.toMove}\n"
-    let msg := s!"Messages: {gs.msg}\n"
-    let captures := s!"Captures: B = {gs.capturedB}, W = {gs.capturedW}\n"
-    let brd := printBoard gs.board
-    (moveNum ++ toMove ++ msg ++ captures ++ brd).toFormat
-
-
-
-def game0 : GameState s[19,19] :=
-  let s := s[19,19]
-  dfltGameState.moveP p[0,0,s]
-  |>.moveP p[1,0,s]
-  |>.moveP p[0,1,s]
-  |>.moveP p[1,1,s]
-  |>.moveP p[3,3,s]
-  |>.moveP p[0,2,s]
-
-def game1 : GameState s[19,19] :=
-  let s := s[19,19]
-  dfltGameState.moveN 0 0
-  |>.moveN 1 0
-  |>.moveN 0 1
-  |>.moveN 1 1
-  |>.moveN 3 3
-  |>.moveN 0 2
-
-#eval game1
-
-def game2 : GameState s[19,19] :=
-  let s := s[19,19]
-  dfltGameState.moveP p[0,0,s]
-  |>.moveP p[3,4,s]
-  |>.moveP p[4,4,s]
-  |>.moveP p[0,1,s]
-  |>.moveP p[5,5,s]
-  |>.moveP p[1,0,s]
-
-def game3 : GameState s[19,19] :=
-  let s := s[19,19]
-  dfltGameState.moveN 0 0
-  |>.moveN 3 4
-  |>.moveN 4 4
-  |>.moveN 0 1
-  |>.moveN 5 5
-  |>.moveN 1 0
-
-#eval game3
+  reprPrec gs _ := printGameState gs
 
 notation "n[" r "," c "]" => Move.place <| Place.num r c
 notation "pass" => Move.pass
 notation "c[" r "," c "]" => Move.place <| Place.char r c
-
-open GameState Move Place
-
-def game4 : GameState s[19,19] :=
-  startGame.playGame [place <| num 1 1]
-
-#eval game4
-
-def game5 : GameState s[19,19] :=
-  startGame.playGame [ n[1,1], n[3,4], c['a','b'] ]
-
-#eval game5
