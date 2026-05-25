@@ -10,8 +10,8 @@ inductive Color
   | W
   deriving DecidableEq, Repr, Inhabited
 
-/-- Prints `Color`'s color -/
-def printColor : Color → String
+instance : ToString Color where
+  toString
   | .B => "Black"
   | .W => "White"
 
@@ -38,19 +38,37 @@ abbrev Board (s : Size) := Vector (Vector (Option Color) s.cl) s.rl
 
 def defaultSize : Size := s[19,19]
 
+structure Captures where
+  white : Nat := 0
+  black : Nat := 0
+
+instance : ToString Captures where
+  toString captures :=
+    s!"Captures: B = {captures.black}, W = {captures.white}"
+
+inductive IllegalMoveReason where
+  | outOfBoard
+  | occupied
+  | selfCapture
+  | ko
+  | invalidNotation
+
+inductive MoveResult where
+  | legal
+  | illegal (reason : IllegalMoveReason)
+
 /--
 The Game State, containing the board, next color to move,
 previous board to check for ko, number of captured pieces,
 the move number and any messages for the players.
 -/
 structure GameState (s : Size) where
-  board : Board s
-  turn : Color
+  board       : Board s
+  turn        : Color
   prev_board? : Option <| Board s
-  capturedW : Nat
-  capturedB : Nat
-  moveNum : Nat
-  msg : String
+  captures    : Captures
+  moveNum     : Nat
+  moveResult  : MoveResult
 
 /--
 `Point` specifies a point by row and column, and
@@ -93,19 +111,29 @@ def emptyBoard {s : Size} : Board s :=
     ⟨Array.replicate s.cl none, by simp⟩
   ⟨Array.replicate s.rl row, by simp⟩
 
-/-- Default Message to display -/
-def defaultMsg : String := "Valid Move"
+instance : ToString IllegalMoveReason where
+  toString
+    | .outOfBoard      => "Out of Board!"
+    | .occupied        => "Occupied!"
+    | .selfCapture     => "Self-Capture!"
+    | .ko              => "Ko!"
+    | .invalidNotation => "Invalid Notation!"
+
+instance : ToString MoveResult where
+  toString result :=
+    match result with
+    | .legal          => ""
+    | .illegal reason => "Illegal: " ++ toString reason
 
 /-- Inhabited GameState -/
 instance {s} : Inhabited (GameState s) where
   default := {
-    board := emptyBoard,
-    turn := Color.B,
+    board       := emptyBoard,
+    turn        := Color.B,
     prev_board? := none,
-    capturedW := 0,
-    capturedB := 0,
-    moveNum := 0,
-    msg := defaultMsg
+    captures    := {}
+    moveNum     := 0,
+    moveResult  := .legal
     }
 
 /-- Create a `GameState` with an empty board and black to start
@@ -384,11 +412,9 @@ def Board.captureStoneGroups {s} (board : Board s) (stgarr : StoneGroupsArr s)
     : Board s :=
   stgarr.foldl (fun b stg => b.captureStoneGroup stg) board
 
-/-- Check if playing at `p` is ko -/
-def GameState.isKo {s} (gs : GameState s) (p : Point s)
+def GameState.isKo {s} (gs : GameState s) (board : Board s)
     : Bool :=
-  let new_board := gs.board.placeForceAt p (gs.turn)
-  new_board == gs.prev_board?
+  gs.prev_board? == board
 
 /-- Check if StoneGroup `stg` has zero libs -/
 def StoneGroup.hasZeroLibs {s} (stg : StoneGroup s)
@@ -415,42 +441,46 @@ def Board.hasZeroLibsFrom {s} (board : Board s) (st : Stone s)
   stg.hasZeroLibs
 
 def Board.playCaptures {s} (board : Board s) (p : Point s) (turn : Color)
-    : Except String <| Board s × Nat :=
+    : Except IllegalMoveReason <| Board s × Nat :=
   let new_board := board.placeForceAt p turn
   let oppNbhdZeroLibsStoneGroups := new_board.getNbhdGroupCapturesAt p turn
   if oppNbhdZeroLibsStoneGroups.isEmpty then
     if new_board.hasZeroLibsFrom ⟨turn, p⟩ then
-      Except.error "Illegal: Self-Capture!"
+      Except.error <| .selfCapture
     else
       Except.ok (new_board, 0)
   else
     Except.ok (new_board.captureStoneGroups oppNbhdZeroLibsStoneGroups,
       oppNbhdZeroLibsStoneGroups.totalSize)
 
-def GameState.updateCaptures {s} (gs : GameState s) (captures : Nat)
-    : GameState s :=
-  match gs.turn with
-  | .B => {gs with capturedW := captures + gs.capturedW}
-  | .W => {gs with capturedB := captures + gs.capturedB}
+def Captures.updateFor (captures : Captures) (col : Color) (capNum : Nat)
+    : Captures :=
+  match col with
+  | .B => {captures with black := capNum + captures.black}
+  | .W => {captures with white := capNum + captures.white}
 
+/-- Play at point `p` in GameState `gs` and return the new GameState -/
 def GameState.moveP {s} (gs : GameState s) (p : Point s)
     : GameState s :=
+  /-The order of steps is important:
+      1. Check if `p` is empty
+      2. Play captures
+      3. Check for ko-/
   match gs.board.isEmptyPoint p with
-  | false => {gs with msg := "Error: Point not empty!"}
-  | true =>
-    match gs.isKo p with
-    | true => {gs with msg := "Illegal: Ko!"}
-    | false =>
+  | false => {gs with moveResult := .illegal .occupied}
+  | true  =>
     match gs.board.playCaptures p gs.turn with
-    | Except.error msg => {gs with msg := msg}
-    | Except.ok (new_board, captures) =>
-      let new_gs :=
-        {gs with board       := new_board,
-                 turn      := nextTurn gs.turn,
-                 prev_board? := some gs.board,
-                 msg         := defaultMsg,
-                 moveNum     := gs.moveNum + 1}
-      new_gs.updateCaptures captures
+    | Except.error reason => {gs with moveResult := .illegal reason}
+    | Except.ok (new_board, capNum) =>
+      match gs.isKo new_board with
+      | true  => {gs with moveResult := .illegal .ko}
+      | false => {gs with
+        board       := new_board,
+        turn        := nextTurn gs.turn,
+        prev_board? := some gs.board,
+        captures    := gs.captures.updateFor gs.turn capNum
+        moveNum     := gs.moveNum + 1
+        moveResult  := .legal }
 
 def GameState.moveN {s} (gs : GameState s) (r c : Nat)
     : GameState s :=
@@ -458,9 +488,9 @@ def GameState.moveN {s} (gs : GameState s) (r c : Nat)
       let p := Point.mk ⟨r,h.1⟩ ⟨c,h.2⟩
       gs.moveP p
   else
-    {gs with msg := "Error: Move outside board!"}
+    {gs with moveResult := .illegal .outOfBoard}
 
-def ltrToNum (ch : Char) : Except String Nat :=
+def ltrToNum (ch : Char) : Except IllegalMoveReason Nat :=
   let num := ch.toNat
   if 97 <= num && num <= 122 then
     .ok <| num - 97
@@ -468,15 +498,15 @@ def ltrToNum (ch : Char) : Except String Nat :=
     if 65 <= num && num <= 90 then
       .ok <| num - 65
     else
-      .error "Error: Invalid Notation!"
+      .error .invalidNotation
 
 def GameState.moveC {s} (gs : GameState s) (r_ch c_ch : Char)
     : GameState s :=
   match ltrToNum r_ch with
-  | .error msg => {gs with msg := msg}
+  | .error reason => {gs with moveResult := .illegal reason}
   | .ok r_num  =>
     match ltrToNum c_ch with
-    | .error msg => {gs with msg := msg}
+    | .error reason => {gs with moveResult := .illegal reason}
     | .ok c_num =>
       gs.moveN r_num c_num
 
@@ -516,24 +546,30 @@ def printOptColor : Option Color → String
 | none =>    "+"
 
 def printRow {n} (vec : Vector (Option Color) n) : String :=
-  String.intercalate "" (vec.map printOptColor).toList
+  String.intercalate " " (vec.map printOptColor).toList
 
 def printBoard {s} (board : Board s) : String :=
   String.intercalate "\n" (board.map printRow).toList
 
+instance {s} : ToString <| Board s where
+  toString := printBoard
+
 def printGameState {s} (gs : GameState s) : String :=
-  let moveNum := s!"Move Number: {gs.moveNum}\n"
-  let turn := s!"To Move: {printColor gs.turn}\n"
-  let msg := s!"Messages: {gs.msg}\n"
-  let captures := s!"Captures: B = {gs.capturedB}, W = {gs.capturedW}\n"
-  let brd := printBoard gs.board
-  moveNum ++ turn ++ msg ++ captures ++ brd
+  let moveRes := s!"{gs.moveResult}"
+  let moveResult :=
+    if moveRes == "" then moveRes
+    else moveRes ++ "\n"
+  let moveNum := s!"Move {gs.moveNum}\n"
+  let turn := s!"To Move: {gs.turn}\n"
+  let captures := s!"{gs.captures}\n"
+  let board := s!"{gs.board}"
+  moveResult ++ moveNum ++ turn ++ captures ++ board
 
 instance {s} : ToString <| GameState s where
   toString gs := printGameState gs
 
 instance {s} : Repr <| GameState s where
-  reprPrec gs _ := printGameState gs
+  reprPrec gs _ := toString gs
 
 notation "n[" r "," c "]" => Move.place <| Place.num r c
 notation "pass" => Move.pass
