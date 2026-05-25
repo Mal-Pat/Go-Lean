@@ -45,7 +45,7 @@ the move number and any messages for the players.
 -/
 structure GameState (s : Size) where
   board : Board s
-  toMove : Color
+  turn : Color
   prev_board? : Option <| Board s
   capturedW : Nat
   capturedB : Nat
@@ -57,10 +57,8 @@ structure GameState (s : Size) where
 the proof that both are less than `s.rl` and `s.cl` respectively
 -/
 structure Point (s : Size) where
-  r : Nat
-  c : Nat
-  r_lt_n : r < s.rl := by decide
-  c_lt_n : c < s.cl := by decide
+  r : Fin s.rl
+  c : Fin s.cl
   deriving DecidableEq, Repr
 
 /-- Notation for `Point` -/
@@ -102,7 +100,7 @@ def defaultMsg : String := "Valid Move"
 instance {s} : Inhabited (GameState s) where
   default := {
     board := emptyBoard,
-    toMove := Color.B,
+    turn := Color.B,
     prev_board? := none,
     capturedW := 0,
     capturedB := 0,
@@ -123,7 +121,7 @@ abbrev StonesArr (s : Size) := Array <| Stone s
 /-- Get some color or none at a point on board -/
 def Board.getColorAt? {s} (board : Board s) (p : Point s)
     : Option Color :=
-  (board[p.r]'(p.r_lt_n))[p.c]'(p.c_lt_n)
+  board[p.r][p.c]
 
 /-- Check if a point on board is empty -/
 def Board.isEmptyPoint {s} (board : Board s) (p : Point s)
@@ -274,20 +272,20 @@ def StoneGroup.getValueGroup {s} (stg : StoneGroup s)
 /-- Get the neighboring points of a point -/
 def Point.getNbhdPoints {s} (p : Point s)
     : PointsArr s :=
-  let up : Option <| Point s :=
-    if p.r == 0 then none
-    else some ⟨p.r - 1, p.c, by grind [p.r_lt_n], p.c_lt_n⟩
-  let down : Option <| Point s :=
-    if row_eq_n : p.r == s.rl - 1 then none
-    else some ⟨p.r + 1, p.c, by grind [p.r_lt_n], p.c_lt_n⟩
-  let left : Option <| Point s :=
-    if p.c == 0 then none
-    else some ⟨p.r, p.c - 1, p.r_lt_n, by grind[p.c_lt_n]⟩
-  let right : Option <| Point s :=
-    if row_eq_n : p.c == s.cl - 1 then none
-    else some ⟨p.r, p.c + 1, p.r_lt_n, by grind[p.c_lt_n]⟩
   #[up, down, left, right].filterMap id
-  -- or #[up, down, left, right].filter fun p => (p != none)
+  where
+    up :=
+      if p.r == ⟨0, by grind[s.two_le_rl]⟩ then none
+      else some ⟨⟨p.r - 1, by grind⟩, p.c⟩
+    down :=
+      if row_eq_n : p.r == s.rl - 1 then none
+      else some ⟨⟨p.r + 1, by grind⟩, p.c⟩
+    left :=
+      if p.c == ⟨0, by grind[s.two_le_cl]⟩ then none
+      else some ⟨p.r, ⟨p.c - 1, by grind⟩⟩
+    right :=
+      if row_eq_n : p.c == s.cl - 1 then none
+      else some ⟨p.r, ⟨p.c + 1, by grind⟩⟩
 
 /-- Get the neighboring values of a point on board -/
 def Board.getNbhdValuesAt {s} (board : Board s) (p : Point s)
@@ -305,32 +303,24 @@ def Board.getNbhdStonesAt {s} (board : Board s) (p : Point s)
 def deldups {α} [DecidableEq α] (l : List α) : List α :=
   l.foldl (fun unql a => if a ∈ unql then unql else a :: unql) []
 
+/-- Helper for floodfill algorithm -/
 def floodFillHelper {s} (board : Board s) (queue : PointsList s)
   (visited : PointsList s) (liberties : PointsList s) (empty : Bool)
-  (fuel : Nat) -- Add fuel parameter
+  (fuel : Nat)
     : (PointsList s) × (PointsList s) :=
-  -- Termination proof: fuel is a Nat that strictly decreases in every branch
   match fuel with
-  | 0 => (visited, deldups liberties) -- Out of fuel: return what we have
-  | f + 1 =>
-    match queue with
-    | [] =>
-      let uniqueLibs := deldups liberties
-      (visited, uniqueLibs)
+  | 0 => (visited, deldups liberties)
+  | f + 1 => match queue with
+    | [] => (visited, deldups liberties)
     | cur :: rest =>
       if cur ∈ visited then
-        -- Recursion: f < f + 1
         floodFillHelper board rest visited liberties empty f
       else
-        let nbhdPoints := cur.getNbhdPoints
-        let (same, diff) := nbhdPoints.partition
+        let (same, diff) := cur.getNbhdPoints.partition
           fun p => (board.getColorAt? cur == board.getColorAt? p)
         let libs :=
-          if empty then
-            diff
-          else
-            diff.filter fun p => (board.getColorAt? p == none)
-        -- Recursion: f < f + 1
+          if empty then diff
+          else diff.filter fun p => (board.getColorAt? p == none)
         floodFillHelper board (rest ++ same.toList) (cur :: visited) (liberties ++ libs.toList) empty f
 
 /-- The floodfill algorithm -/
@@ -367,9 +357,9 @@ def Board.getStoneGroupsFrom {s} (board : Board s) (starr : StonesArr s)
 /-- Set point `p` to `col?` on `board` -/
 def Board.setAt {s} (board : Board s) (p : Point s) (col? : Option Color)
     : Board s :=
-  let row := board[p.r]'(p.r_lt_n)
-  let modified_row := row.set p.c col? (p.c_lt_n)
-  let modified_board := board.set p.r modified_row p.r_lt_n
+  let row := board[p.r]
+  let modified_row := row.set p.c col?
+  let modified_board := board.set p.r modified_row
   modified_board
 
 /-- Set point `p` to color `col` on `board` -/
@@ -397,34 +387,26 @@ def Board.captureStoneGroups {s} (board : Board s) (stgarr : StoneGroupsArr s)
 /-- Check if playing at `p` is ko -/
 def GameState.isKo {s} (gs : GameState s) (p : Point s)
     : Bool :=
-  let new_board := gs.board.placeForceAt p (gs.toMove)
-  if new_board == gs.prev_board? then
-    true
-  else
-    false
+  let new_board := gs.board.placeForceAt p (gs.turn)
+  new_board == gs.prev_board?
 
 /-- Check if StoneGroup `stg` has zero libs -/
 def StoneGroup.hasZeroLibs {s} (stg : StoneGroup s)
     : Bool :=
-  if stg.getNumLibs != 0 then
-    false
-  else
-    true
+  stg.getNumLibs == 0
 
-def StoneGroupsArr.filterZeroLibs {s} (stgarr : StoneGroupsArr s)
+def StoneGroupsArr.filterZeroLibsGroups {s} (stgarr : StoneGroupsArr s)
     : StoneGroupsArr s :=
   stgarr.filter fun stg => stg.hasZeroLibs
 
-#check Array.all
-
-/-- Return the StoneGroups that get captured on playing `toMove` at `p`.
-    Ensure you give the new board with `p` set at `toMove` already. -/
-def Board.getNbhdGroupCapturesAt {s} (board : Board s) (p : Point s) (toMove : Color)
+/-- Return the StoneGroups that get captured on playing `turn` at `p`.
+    Ensure you give the new board with `p` set at `turn` already. -/
+def Board.getNbhdGroupCapturesAt {s} (board : Board s) (p : Point s) (turn : Color)
     : StoneGroupsArr s :=
   let nbhdStones := board.getNbhdStonesAt p
-  let oppNbhdStones := nbhdStones.filterColor (oppColor toMove)
+  let oppNbhdStones := nbhdStones.filterColor (oppColor turn)
   let oppNbhdStoneGroups := board.getStoneGroupsFrom oppNbhdStones
-  let oppNbhdZeroLibsStoneGroups := oppNbhdStoneGroups.filterZeroLibs
+  let oppNbhdZeroLibsStoneGroups := oppNbhdStoneGroups.filterZeroLibsGroups
   oppNbhdZeroLibsStoneGroups.deldups
 
 def Board.hasZeroLibsFrom {s} (board : Board s) (st : Stone s)
@@ -432,23 +414,22 @@ def Board.hasZeroLibsFrom {s} (board : Board s) (st : Stone s)
   let stg := board.getStoneGroupFrom st
   stg.hasZeroLibs
 
-def Board.playCaptures {s} (board : Board s) (p : Point s) (toMove : Color)
+def Board.playCaptures {s} (board : Board s) (p : Point s) (turn : Color)
     : Except String <| Board s × Nat :=
-  let new_board := board.placeForceAt p toMove
-  let oppNbhdZeroLibsStoneGroups := new_board.getNbhdGroupCapturesAt p toMove
+  let new_board := board.placeForceAt p turn
+  let oppNbhdZeroLibsStoneGroups := new_board.getNbhdGroupCapturesAt p turn
   if oppNbhdZeroLibsStoneGroups.isEmpty then
-    if new_board.hasZeroLibsFrom ⟨toMove, p⟩ then
+    if new_board.hasZeroLibsFrom ⟨turn, p⟩ then
       Except.error "Illegal: Self-Capture!"
     else
       Except.ok (new_board, 0)
   else
-    Except.ok <|
-      (new_board.captureStoneGroups oppNbhdZeroLibsStoneGroups,
-        oppNbhdZeroLibsStoneGroups.totalSize)
+    Except.ok (new_board.captureStoneGroups oppNbhdZeroLibsStoneGroups,
+      oppNbhdZeroLibsStoneGroups.totalSize)
 
 def GameState.updateCaptures {s} (gs : GameState s) (captures : Nat)
     : GameState s :=
-  match gs.toMove with
+  match gs.turn with
   | .B => {gs with capturedW := captures + gs.capturedW}
   | .W => {gs with capturedB := captures + gs.capturedB}
 
@@ -460,12 +441,12 @@ def GameState.moveP {s} (gs : GameState s) (p : Point s)
     match gs.isKo p with
     | true => {gs with msg := "Illegal: Ko!"}
     | false =>
-    match gs.board.playCaptures p gs.toMove with
+    match gs.board.playCaptures p gs.turn with
     | Except.error msg => {gs with msg := msg}
     | Except.ok (new_board, captures) =>
       let new_gs :=
         {gs with board       := new_board,
-                 toMove      := nextTurn gs.toMove,
+                 turn      := nextTurn gs.turn,
                  prev_board? := some gs.board,
                  msg         := defaultMsg,
                  moveNum     := gs.moveNum + 1}
@@ -473,12 +454,9 @@ def GameState.moveP {s} (gs : GameState s) (p : Point s)
 
 def GameState.moveN {s} (gs : GameState s) (r c : Nat)
     : GameState s :=
-  if h1 : r < s.rl then
-    if h2 : c < s.cl then
-      let p := Point.mk r c h1 h2
+  if h : r < s.rl ∧ c < s.cl then
+      let p := Point.mk ⟨r,h.1⟩ ⟨c,h.2⟩
       gs.moveP p
-    else
-      {gs with msg := "Error: Move outside board!"}
   else
     {gs with msg := "Error: Move outside board!"}
 
@@ -502,10 +480,10 @@ def GameState.moveC {s} (gs : GameState s) (r_ch c_ch : Char)
     | .ok c_num =>
       gs.moveN r_num c_num
 
-/-- Pass only changes `toMove`; the board remains the same -/
+/-- Pass only changes `turn`; the board remains the same -/
 def GameState.pass {s} (gs : GameState s)
     : GameState s :=
-  {gs with toMove := nextTurn gs.toMove}
+  {gs with turn := nextTurn gs.turn}
 
 inductive Place (s : Size) where
   | num (r : Nat) (c : Nat)
@@ -545,11 +523,11 @@ def printBoard {s} (board : Board s) : String :=
 
 def printGameState {s} (gs : GameState s) : String :=
   let moveNum := s!"Move Number: {gs.moveNum}\n"
-  let toMove := s!"To Move: {printColor gs.toMove}\n"
+  let turn := s!"To Move: {printColor gs.turn}\n"
   let msg := s!"Messages: {gs.msg}\n"
   let captures := s!"Captures: B = {gs.capturedB}, W = {gs.capturedW}\n"
   let brd := printBoard gs.board
-  moveNum ++ toMove ++ msg ++ captures ++ brd
+  moveNum ++ turn ++ msg ++ captures ++ brd
 
 instance {s} : ToString <| GameState s where
   toString gs := printGameState gs
