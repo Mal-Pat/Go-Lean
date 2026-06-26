@@ -187,7 +187,7 @@ def Board.getColorAt? {s} (board : Board s) (p : Point s)
   | .empty => none
   | .col c => c
 
-/-- Set point `p` to `col?` on `board` -/
+/-- Set point `p` to `stone` on `board` -/
 def Board.setAt {s} (board : Board s) (p : Point s) (stone : Stone)
     : Board s :=
   let row := board[p.r]
@@ -221,22 +221,39 @@ def Board.getNbhdPlacesAt {s} (board : Board s) (p : Point s)
 
 end Board
 
-section GameState
+section ScoreBoard
 
-structure Captures where
-  white : Nat := 0
-  black : Nat := 0
+/-- `ScoreBoard` -/
+abbrev ScoreBoard (s : Size) := Vector (Vector (ScoreStone) s.cl) s.rl
 
-inductive InvalidMoveReason where
-  | outOfBoard
-  | occupied
-  | selfCapture
-  | ko
-  | invalidNotation
+/-- Create an empty score board (filled with `.area .empty`)
+    (size will be inferred from context) -/
+def emptyScoreBoard {s : Size} : ScoreBoard s :=
+  let row : Vector ScoreStone s.cl :=
+    ⟨Array.replicate s.cl (.area .empty), by simp⟩
+  ⟨Array.replicate s.rl row, by simp⟩
 
-inductive MoveResult where
-  | valid
-  | invalid (reason : InvalidMoveReason)
+/-- Get score stone at a point on score board -/
+def ScoreBoard.getScoreStoneAt {s} (sboard : ScoreBoard s) (p : Point s)
+    : ScoreStone :=
+  sboard[p.r][p.c]
+
+/-- Set point `p` to `scst` on `sboard` -/
+def ScoreBoard.setAt {s} (sboard : ScoreBoard s) (p : Point s) (scst : ScoreStone)
+    : ScoreBoard s :=
+  let row := sboard[p.r]
+  let modified_row := row.set p.c scst
+  let modified_board := sboard.set p.r modified_row
+  modified_board
+
+/-- Set all points in `parr` to `col?` on `board` -/
+def ScoreBoard.setManyAt {s} (sboard : ScoreBoard s) (parr : PointsArr s) (scst : ScoreStone)
+    : ScoreBoard s :=
+  parr.foldl (fun b p => b.setAt p scst) sboard
+
+end ScoreBoard
+
+section SetUp
 
 structure GameDetails where
   player1  : String := "Player 1"
@@ -244,37 +261,14 @@ structure GameDetails where
   handicap : Nat    := 0
   komi     : Float  := 6.5
 
-inductive SetDetailsResult where
+inductive SetUpResult where
   | valid
   | invalid
 
-structure Score where
-  white : Nat
-  Black : Nat
+structure SetUp where
+  size        : Size
+  board       : Board size
+  details     : GameDetails
+  setUpResult : SetUpResult
 
-inductive GameStatus where
-  | ongoing
-  | score (s : Score)
-  | finish (s : Score)
-
-/--
-The Game State - containing the board, current turn,
-previous board to check for ko, number of captured stones,
-move number, move result, the game result and game details.
--/
-structure GameState (s : Size) where
-  board       : Board s           := emptyBoard
-  turn        : Color             := .B
-  prev_board? : Option <| Board s := none
-  captures    : Captures          := {}
-  moveNum     : Nat               := 0
-  moveResult  : MoveResult        := .valid
-  gameStatus  : GameStatus        := .ongoing
-  gameDetails : GameDetails       := {}
-  setDetails  : SetDetailsResult  := .valid
-
-def GameState.isKo {s} (gs : GameState s) (board : Board s)
-    : Bool :=
-  gs.prev_board? == board
-
-end GameState
+end SetUp
