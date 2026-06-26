@@ -1,5 +1,42 @@
 import GoLean.FloodFill
 
+section GameState
+
+structure Captures where
+  white : Nat := 0
+  black : Nat := 0
+
+inductive InvalidMoveReason where
+  | outOfBoard
+  | occupied
+  | selfCapture
+  | ko
+  | invalidNotation
+
+inductive MoveResult where
+  | valid
+  | invalid (reason : InvalidMoveReason)
+
+/--
+The Game State - containing the board, current turn,
+previous board to check for ko, number of captured stones,
+move number, move result, the game result and game details.
+-/
+structure GameState extends SetUp where
+  turn        : Color                := .B
+  prev_board? : Option <| Board size := none
+  captures    : Captures             := {}
+  moveNum     : Nat                  := 0
+  moveResult  : MoveResult           := .valid
+
+def GameState.isKo (gs : GameState) (board : Board gs.size)
+    : Bool :=
+  gs.prev_board? == board
+
+end GameState
+
+section Play
+
 /-- Return the StoneGroups that get captured on playing `turn` at `p`.
     Ensure you give the new board with `p` set at `turn` already. -/
 def Board.getNbhdGroupCapturesAt {s} (board : Board s) (p : Point s) (turn : Color)
@@ -30,8 +67,8 @@ def Captures.updateFor (captures : Captures) (col : Color) (capNum : Nat)
   | .W => {captures with white := capNum + captures.white}
 
 /-- Play at point `p` in GameState `gs` and return the new GameState -/
-def GameState.moveP {s} (gs : GameState s) (p : Point s)
-    : GameState s :=
+def GameState.moveP (gs : GameState) (p : Point gs.size)
+    : GameState :=
   /-  The order of steps is important:
       1. Check if `p` is empty
       2. Play captures
@@ -51,3 +88,10 @@ def GameState.moveP {s} (gs : GameState s) (p : Point s)
         captures    := gs.captures.updateFor gs.turn capNum
         moveNum     := gs.moveNum + 1
         moveResult  := .valid }
+
+/-- Pass only changes `turn`; the board remains the same -/
+def GameState.pass (gs : GameState)
+    : GameState :=
+  {gs with turn := gs.turn.oppColor, moveNum := gs.moveNum + 1}
+
+end Play
