@@ -4,5 +4,6 @@ import GoLean.Core.Rules
 import GoLean.Core.Play
 import GoLean.Core.Score
 import GoLean.Core.Game
+import GoLean.Core.Sgf
 import GoLean.Protocol
 import GoLean.Widget
