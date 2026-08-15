@@ -23,3 +23,7 @@ There is also a "Load from SGF" box on the setup screen for pasting.
 -/
 
 #go "games/sample.sgf"
+
+#go "games/sjs_katago_game2.sgf"
+
+#go from "(;GM[1]FF[4]SZ[9];B[ee];W[cc])"
