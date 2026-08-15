@@ -38,12 +38,21 @@ infoview with three phases:
     * Both players accept (or resume play on a dispute)
     * The final score and winner are displayed
 
+In any phase, 
+- **Review moves** switches to a read-only replay of the game.
+  Step through the positions with ⏮ ◀ ▶ ⏭ or the slider. Click
+  **Back to game** to return to the live game (which is not affected in the review mode).
+- **Copy SGF** exports the game so far in Smart Game Format 
+  (paste into a `.sgf` file to open it in any Go program)
+- **Copy JSON** exports the raw game record so far
+
 ## Architecture
 
 - `GoLean/Core/` contains a pure rules engine
   (`Game.step : Game → Action → Except IllegalAction Game`). 
   One generic flood fill (`Board.region`) works for
   chains, captures and territory.
+- `GoLean/Core/Sgf.lean` serializes a game to SGF FF[4] (Smart Game Format File Format 4)
 - `GoLean/Protocol.lean` contains JSON DTOs. The wire state held by the client is
   the event log (config + actions), which is rebuilt server-side by folding `step`.
 - `GoLean/Widget.lean` + `GoLean/widget/goBoard.js` contains one RPC method and a
