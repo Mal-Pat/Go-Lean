@@ -11,6 +11,11 @@ maxSynthPendingDepth = 3
 
 [[lean_lib]]
 name = "GoLean"
+globs = ["GoLean", "GoLean.+"]
+
+[[lean_lib]]
+name = "Tests"
+globs = ["Tests.+"]
 
 [[require]]
 name = "proofwidgets"
