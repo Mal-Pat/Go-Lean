@@ -2,6 +2,8 @@
 
 The game of Go/Baduk/Weiqi in Lean 4, with an interactive board in the VS Code infoview.
 
+![GoLeanSandbox](./images/GoLeanSandbox.png)
+
 ## Build & test
 
 ```sh
