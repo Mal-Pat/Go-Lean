@@ -4,6 +4,7 @@ Authors: Malhar A. Patel
 
 import Lean.Data.Json
 import GoLean.Core.Game
+import GoLean.Core.Sgf
 
 /-!
 # The RPC protocol layer
@@ -101,6 +102,12 @@ structure ViewDto where
   whiteAccepted : Bool := false
   colLabels : Array String
   rowLabels : Array String
+  /-- Number of moves (stone placements + passes) in the whole game. -/
+  totalMoves : Nat := 0
+  /-- In review mode (`phase = "review"`): the move currently shown. -/
+  reviewMove : Nat := 0
+  /-- The game so far, serialized as SGF (FF[4]). -/
+  sgf : String := ""
   scoreCard : Option ScoreCardDto := none
   result : Option String := none
   deriving ToJson, FromJson, Inhabited
@@ -108,6 +115,11 @@ structure ViewDto where
 structure UpdateRequest where
   game : GameDto
   action : Option ActionDto := none
+  /-- `some k`: do not apply any action; instead return a read-only view of
+  the position after the first `k` moves (clamped to the game length).
+  The event log is left untouched — the client uses this to step back and
+  forth through the game. -/
+  review : Option Nat := none
   deriving ToJson, FromJson, Inhabited
 
 /-- A rejected action returns the unchanged `game` plus `error`; the log
@@ -174,6 +186,27 @@ def Action.toDto : Action → ActionDto
   | .accept .black => { kind := "accept", who := "black" }
   | .accept .white => { kind := "accept", who := "white" }
   | .resume => { kind := "resume" }
+
+/-- Number of moves (stone placements + passes) in the log. -/
+def Game.countMoves (g : Game) : Nat :=
+  g.actions.foldl (fun n a => if a.isMove then n + 1 else n) 0
+
+/-- The shortest legal prefix of a log realizing the position after the
+first `k` moves: everything up to and including the `k`-th move action,
+with non-move actions kept only when a later included move needs the phase
+they establish (i.e. they precede the `k`-th move). -/
+def movePrefix (actions : Array Action) (k : Nat) : Array Action := Id.run do
+  let mut out : Array Action := #[]
+  let mut cnt := 0
+  for a in actions do
+    if a.isMove then
+      if cnt ≥ k then
+        return out
+      cnt := cnt + 1
+      out := out.push a
+    else if cnt < k then
+      out := out.push a
+  return out
 
 /-- Rebuild the `Game` from the wire state by folding `Game.step`. -/
 def GameDto.build (gd : GameDto) : Except String Game := do
@@ -260,12 +293,30 @@ def Game.toView (g : Game) : ViewDto :=
     blackAccepted, whiteAccepted
     colLabels := Array.ofFn (n := s.cols) fun c => colLabel c.val
     rowLabels := Array.ofFn (n := s.rows) fun r => toString (s.rows - r.val)
+    totalMoves := g.countMoves
+    sgf := g.toSgf
     scoreCard, result }
 
 /-! ## The update entry point -/
 
-/-- Pure handler behind the RPC method: rebuild, optionally apply one
-action, and return the (possibly advanced) wire state plus the view. -/
+/-- A read-only view of the position after the first `k` moves. The board
+comes from replaying the log prefix; the SGF and move count stay those of
+the full game, and score/result panels are suppressed. -/
+def Game.toReviewView (g : Game) (k : Nat) : Option ViewDto := do
+  let total := g.countMoves
+  let k := min k total
+  let gr ← (Game.ofRecord g.config (movePrefix g.actions k)).toOption
+  return { gr.toView with
+           phase := "review"
+           reviewMove := k
+           totalMoves := total
+           sgf := g.toSgf
+           scoreCard := none
+           result := none }
+
+/-- Pure handler behind the RPC method: rebuild, then either return a
+read-only review view (`review = some k`) or optionally apply one action,
+returning the (possibly advanced) wire state plus the view. -/
 def handleUpdate (req : UpdateRequest) : UpdateResponse :=
   match req.game.build with
   | .error e => { game := req.game, error := some e }
@@ -274,14 +325,20 @@ def handleUpdate (req : UpdateRequest) : UpdateResponse :=
       { game := { config := req.game.config, actions := g'.actions.map Action.toDto }
         view := some g'.toView
         error := err }
-    match req.action with
-    | none => respond g none
-    | some adto =>
-      match adto.toAction with
-      | .error e => respond g (some e)
-      | .ok a =>
-        match g.step a with
-        | .error ill => respond g (some ill.describe)
-        | .ok g' => respond g' none
+    match req.review with
+    | some k =>
+      match g.toReviewView k with
+      | some v => { game := req.game, view := some v, error := none }
+      | none => respond g (some "Could not replay the game for review.")
+    | none =>
+      match req.action with
+      | none => respond g none
+      | some adto =>
+        match adto.toAction with
+        | .error e => respond g (some e)
+        | .ok a =>
+          match g.step a with
+          | .error ill => respond g (some ill.describe)
+          | .ok g' => respond g' none
 
 end GoLean

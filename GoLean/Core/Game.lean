@@ -44,6 +44,12 @@ inductive Action where
   | resume
   deriving DecidableEq, Repr, Inhabited
 
+/-- Stone placements and passes are "moves" — the navigable game record;
+scoring actions, resignation and undo are not. -/
+def Action.isMove : Action → Bool
+  | .play _ _ | .pass => true
+  | _ => false
+
 /-- Reason for rejecting an action. -/
 inductive IllegalAction where
   | outOfBoard
@@ -212,12 +218,9 @@ def undo (g : Game) : Except IllegalAction Game := do
   match g.phase with
   | .playing _ =>
     let arr := g.actions
-    let isMove : Action → Bool
-      | .play _ _ | .pass => true
-      | _ => false
     let idx? := (List.range arr.size).reverse.find? fun i =>
       match arr[i]? with
-      | some a => isMove a
+      | some a => a.isMove
       | none => false
     match idx? with
     | none => throw .nothingToUndo

@@ -159,7 +159,8 @@ function PlayerCard({ name, color, captures, active, accepted, phase }) {
     }),
     h('span', { style: { fontWeight: 'bold' } }, name),
     h('span', { style: { opacity: 0.8 } }, `captures: ${captures}`),
-    phase !== 'playing' ? h('span', { title: 'agreed to the score' }, accepted ? '✓ agreed' : '· undecided') : null,
+    (phase === 'scoring' || phase === 'finished')
+      ? h('span', { title: 'agreed to the score' }, accepted ? '✓ agreed' : '· undecided') : null,
   );
 }
 
@@ -258,6 +259,9 @@ export default function GoGame(_props) {
   const [setupError, setSetupError] = React.useState(null);
   const [toast, setToast] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
+  // Review mode: null = live game; a number = move index currently shown.
+  const [review, setReview] = React.useState(null);
+  const pendingReview = React.useRef(null);
 
   React.useEffect(() => {
     if (!toast) return;
@@ -265,10 +269,14 @@ export default function GoGame(_props) {
     return () => clearTimeout(t);
   }, [toast]);
 
-  async function call(g, action) {
+  async function call(g, action, reviewAt) {
     setBusy(true);
     try {
-      const resp = await rs.call('GoLean.update', { game: g, action: action || null });
+      const resp = await rs.call('GoLean.update', {
+        game: g,
+        action: action || null,
+        review: (reviewAt === undefined || reviewAt === null) ? null : reviewAt,
+      });
       return resp;
     } catch (e) {
       setToast(mapRpcError(e).message);
@@ -300,12 +308,50 @@ export default function GoGame(_props) {
     if (!view) return;
     if (view.phase === 'playing') doAction('play', r, c);
     else if (view.phase === 'scoring') doAction('toggleDead', r, c);
+    // 'review' and 'finished': the board is read-only.
+  }
+
+  /* -------- review mode: read-only navigation through the move list -------- */
+
+  async function doReview(k) {
+    if (!game) return;
+    if (busy) { pendingReview.current = k; return; }
+    const resp = await call(game, null, k);
+    if (!resp || !resp.view) return;
+    setView(resp.view);
+    setReview(resp.view.reviewMove);
+    if (pendingReview.current !== null && pendingReview.current !== k) {
+      const next = pendingReview.current;
+      pendingReview.current = null;
+      doReview(next);
+    } else {
+      pendingReview.current = null;
+    }
+  }
+
+  function enterReview() {
+    if (view) doReview(view.totalMoves);
+  }
+
+  async function exitReview() {
+    if (!game) return;
+    const resp = await call(game, null, null);
+    if (!resp || !resp.view) return;
+    setView(resp.view);
+    setReview(null);
+    pendingReview.current = null;
   }
 
   function exportRecord() {
     const text = JSON.stringify(game, null, 2);
     if (navigator.clipboard) navigator.clipboard.writeText(text);
-    setToast('Game record copied to clipboard.');
+    setToast('Game record (JSON) copied to clipboard.');
+  }
+
+  function exportSgf() {
+    if (!view || !view.sgf) { setToast('No SGF available yet.'); return; }
+    if (navigator.clipboard) navigator.clipboard.writeText(view.sgf);
+    setToast('SGF copied to clipboard — paste into a .sgf file.');
   }
 
   if (screen === 'setup')
@@ -333,22 +379,46 @@ export default function GoGame(_props) {
       { disabled: view.whiteAccepted }));
     buttons.push(btn('Resume play', () => doAction('resume')));
   }
-  buttons.push(btn('Export', exportRecord, { title: 'copy the game record (config + moves) as JSON' }));
-  buttons.push(btn('New game', () => { setScreen('setup'); setGame(null); setView(null); }));
+  if (phase !== 'review')
+    buttons.push(btn('Review moves', enterReview,
+      { title: 'step back and forth through the game (the game itself is untouched)', disabled: view.totalMoves === 0 }));
+  buttons.push(btn('Copy SGF', exportSgf, { title: 'copy the game in Smart Game Format (paste into a .sgf file)' }));
+  buttons.push(btn('Copy JSON', exportRecord, { title: 'copy the game record (config + moves) as JSON' }));
+  buttons.push(btn('New game', () => {
+    setScreen('setup'); setGame(null); setView(null);
+    setReview(null); pendingReview.current = null;
+  }));
+
+  const k = view.reviewMove, N = view.totalMoves;
+  const reviewBar = phase !== 'review' ? null :
+    h('div', { style: { display: 'flex', gap: '0.4em', alignItems: 'center', flexWrap: 'wrap' } },
+      btn('⏮', () => doReview(0), { disabled: k === 0, title: 'first position' }),
+      btn('◀', () => doReview(Math.max(0, k - 1)), { disabled: k === 0, title: 'previous move' }),
+      h('input', {
+        type: 'range', min: 0, max: N, value: k,
+        onChange: (e) => doReview(Number(e.target.value)),
+        style: { flex: '1 1 8em', minWidth: '6em' },
+      }),
+      btn('▶', () => doReview(Math.min(N, k + 1)), { disabled: k === N, title: 'next move' }),
+      btn('⏭', () => doReview(N), { disabled: k === N, title: 'last position' }),
+      btn('Back to game', exitReview));
 
   const status =
-    phase === 'finished' ? null :
-    phase === 'scoring'
-      ? h('div', {}, 'Click a chain to mark it dead/alive; both players must accept the score.')
-      : view.handicapLeft > 0
-        ? h('div', {}, `${view.blackName} places ${view.handicapLeft} more handicap stone(s).`)
-        : h('div', {}, `Move ${view.moveNum} — ${view.toMove === 'black' ? view.blackName : view.whiteName} to play.`
-            + (view.consecPasses > 0 ? ` (${view.consecPasses}/${view.passesToScore} passes)` : ''));
+    phase === 'review'
+      ? h('div', {}, `Reviewing: position after move ${k} of ${N}`
+          + (k < N ? ` — ${view.toMove === 'black' ? view.blackName : view.whiteName} played next.` : ' (current position).'))
+      : phase === 'finished' ? null :
+        phase === 'scoring'
+          ? h('div', {}, 'Click a chain to mark it dead/alive; both players must accept the score.')
+          : view.handicapLeft > 0
+            ? h('div', {}, `${view.blackName} places ${view.handicapLeft} more handicap stone(s).`)
+            : h('div', {}, `Move ${view.moveNum} — ${view.toMove === 'black' ? view.blackName : view.whiteName} to play.`
+                + (view.consecPasses > 0 ? ` (${view.consecPasses}/${view.passesToScore} passes)` : ''));
 
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5em', maxWidth: '40em', padding: '0.3em 0', fontFamily: 'sans-serif' } },
     h('div', { style: { display: 'flex', gap: '0.6em', flexWrap: 'wrap' } },
-      h(PlayerCard, { name: view.blackName, color: 'black', captures: view.blackCaptures, active: phase === 'playing' && view.toMove === 'black', accepted: view.blackAccepted, phase }),
-      h(PlayerCard, { name: view.whiteName, color: 'white', captures: view.whiteCaptures, active: phase === 'playing' && view.toMove === 'white', accepted: view.whiteAccepted, phase })),
+      h(PlayerCard, { name: view.blackName, color: 'black', captures: view.blackCaptures, active: (phase === 'playing' || phase === 'review') && view.toMove === 'black', accepted: view.blackAccepted, phase }),
+      h(PlayerCard, { name: view.whiteName, color: 'white', captures: view.whiteCaptures, active: (phase === 'playing' || phase === 'review') && view.toMove === 'white', accepted: view.whiteAccepted, phase })),
     phase === 'finished'
       ? h('div', { style: { fontSize: '1.25em', fontWeight: 'bold', padding: '0.2em 0' } },
           `Game over: ${view.result}` +
@@ -356,6 +426,7 @@ export default function GoGame(_props) {
             : view.result && view.result.startsWith('W') ? ` — ${view.whiteName} wins` : ''))
       : null,
     status,
+    reviewBar,
     h(Board, { view, phase, onClickPoint }),
     (phase === 'scoring' || phase === 'finished')
       ? h(ScoreTable, { card: view.scoreCard, blackName: view.blackName, whiteName: view.whiteName })
