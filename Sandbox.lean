@@ -11,3 +11,15 @@ The game finishes when both players accept the score.
 -/
 
 #go
+
+/-!
+A game can also be pre-loaded from SGF — it opens in review mode so you
+can step through the moves (and continue playing via "Back to game"):
+
+- from a file (path relative to this file): `#go "games/sample.sgf"`
+- from a string: `#go from "(;GM[1]FF[4]SZ[9];B[ee];W[cc])"`
+
+There is also a "Load from SGF" box on the setup screen for pasting.
+-/
+
+#go "games/sample.sgf"
