@@ -83,11 +83,6 @@ inductive Stone where
   | empty
   deriving Repr, DecidableEq
 
-inductive ScoreStone where
-  | alive (c : Color)
-  | dead  (c : Color)
-  | area  (s : Stone)
-
 end Stone
 
 section Place
@@ -106,7 +101,7 @@ def PlaceArr.getPoints {s} (plarr : PlaceArr s)
 /-- Filter places w.r.t a stone -/
 def PlaceArr.filterStone {s} (plarr : PlaceArr s) (stone : Stone)
     : PlaceArr s :=
-  plarr.filter (fun st => st.stone == stone)
+  plarr.filter (fun pl => pl.stone == stone)
 
 end Place
 
@@ -142,9 +137,9 @@ def GroupsList.contains {s} (gl : GroupsList s) (target_g : Group s)
 def GroupsArr.deldups {s} (garr : GroupsArr s)
     : GroupsArr s :=
   let gl := garr.toList
-  let unqstgl := gl.foldl (fun unql g =>
+  let unqgl := gl.foldl (fun unql g =>
     if unql.contains g then unql else g :: unql) []
-  unqstgl.toArray
+  unqgl.toArray
 
 def GroupsArr.filterZeroLibs {s} (garr : GroupsArr s)
     : GroupsArr s :=
@@ -220,38 +215,6 @@ def Board.getNbhdPlacesAt {s} (board : Board s) (p : Point s)
   board.getPlacesAt nbhdpoints
 
 end Board
-
-section ScoreBoard
-
-/-- `ScoreBoard` -/
-abbrev ScoreBoard (s : Size) := Vector (Vector (ScoreStone) s.cl) s.rl
-
-/-- Create an empty score board (filled with `.area .empty`)
-    (size will be inferred from context) -/
-def emptyScoreBoard {s : Size} : ScoreBoard s :=
-  let row : Vector ScoreStone s.cl :=
-    ⟨Array.replicate s.cl (.area .empty), by simp⟩
-  ⟨Array.replicate s.rl row, by simp⟩
-
-/-- Get score stone at a point on score board -/
-def ScoreBoard.getScoreStoneAt {s} (sboard : ScoreBoard s) (p : Point s)
-    : ScoreStone :=
-  sboard[p.r][p.c]
-
-/-- Set point `p` to `scst` on `sboard` -/
-def ScoreBoard.setAt {s} (sboard : ScoreBoard s) (p : Point s) (scst : ScoreStone)
-    : ScoreBoard s :=
-  let row := sboard[p.r]
-  let modified_row := row.set p.c scst
-  let modified_board := sboard.set p.r modified_row
-  modified_board
-
-/-- Set all points in `parr` to `col?` on `board` -/
-def ScoreBoard.setManyAt {s} (sboard : ScoreBoard s) (parr : PointsArr s) (scst : ScoreStone)
-    : ScoreBoard s :=
-  parr.foldl (fun b p => b.setAt p scst) sboard
-
-end ScoreBoard
 
 section SetUp
 

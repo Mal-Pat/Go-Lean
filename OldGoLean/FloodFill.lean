@@ -29,16 +29,3 @@ def floodFill {s} (board : Board s) (point : Point s) (empty : Bool)
     : (PointsList s) × (PointsList s) :=
   let fuel := (s.rl * s.cl) + 1
   floodFillHelper board [point] [] [] empty fuel
-
-/-- Get the StoneGroup at point `p` on `board` -/
-def Board.getGroupAt {s} (board : Board s) (p : Point s)
-    : Group s :=
-  let empty := board.isEmptyPoint p
-  let (points, liberties) := floodFill board p empty
-  -- maybe add check for StoneGroup here
-  ⟨board.getStoneAt p, points.toArray, liberties.toArray⟩
-
-/-- Get all StoneGroups from array of points -/
-def Board.getStoneGroupsAt {s} (board : Board s) (parr : PointsArr s)
-    : GroupsArr s :=
-  parr.map fun point => board.getGroupAt point

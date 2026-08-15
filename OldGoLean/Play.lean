@@ -1,5 +1,22 @@
 import GoLean.FloodFill
 
+section FloodFill
+
+/-- Get the StoneGroup at point `p` on `board` -/
+def Board.getGroupAt {s} (board : Board s) (p : Point s)
+    : Group s :=
+  let empty := board.isEmptyPoint p
+  let (points, liberties) := floodFill board p empty
+  -- maybe add check for StoneGroup here
+  ⟨board.getStoneAt p, points.toArray, liberties.toArray⟩
+
+/-- Get all StoneGroups from array of points -/
+def Board.getGroupsAt {s} (board : Board s) (parr : PointsArr s)
+    : GroupsArr s :=
+  parr.map fun point => board.getGroupAt point
+
+end FloodFill
+
 section GameState
 
 structure Captures where
@@ -43,7 +60,7 @@ def Board.getNbhdGroupCapturesAt {s} (board : Board s) (p : Point s) (turn : Col
     : GroupsArr s :=
   let nbhdPlaces := board.getNbhdPlacesAt p
   let oppNbhdPlaces := nbhdPlaces.filterStone <| .col turn.oppColor
-  let oppNbhdGroups := board.getStoneGroupsAt oppNbhdPlaces.getPoints
+  let oppNbhdGroups := board.getGroupsAt oppNbhdPlaces.getPoints
   let oppNbhdZeroLibsGroups := oppNbhdGroups.filterZeroLibs
   oppNbhdZeroLibsGroups.deldups
 
@@ -52,10 +69,9 @@ def Board.playCaptures {s} (board : Board s) (p : Point s) (turn : Color)
   let new_board := board.setAt p (.col turn)
   let oppNbhdZeroLibsGroups := new_board.getNbhdGroupCapturesAt p turn
   if oppNbhdZeroLibsGroups.isEmpty then
-    if (new_board.getGroupAt p).liberties.size == 0 then
-      Except.error <| .selfCapture
-    else
-      Except.ok (new_board, 0)
+    match (new_board.getGroupAt p).liberties.size with
+    | 0 => Except.error <| .selfCapture
+    | _ => Except.ok (new_board, 0)
   else
     Except.ok (new_board.captureStoneGroups oppNbhdZeroLibsGroups,
       oppNbhdZeroLibsGroups.totalSize)
