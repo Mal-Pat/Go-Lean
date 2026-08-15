@@ -16,8 +16,15 @@ pass→scoring, dead marks and both scoring methods, undo/replay, handicap
 ## Play
 
 Open [Sandbox.lean](Sandbox.lean) (or write `import GoLean` + `#go` in any
-file) and put the cursor on the `#go` line. The board appears in the
-infoview with three phases:
+file) and put the cursor on the `#go` line. 
+
+A game can also be pre-loaded from SGF (Smart Game Format) and opens in review mode:
+
+- `#go "games/sample.sgf"`, from a file (path relative to the current file)
+- `#go from mySgfString`, from a `String`-valued SGF term
+- `#go`, and paste an SGF into the **Load from SGF** box on the setup screen
+
+The board appears in the infoview with three phases:
 
 1. **Setup:** Before starting the game, set
     * Board Size
@@ -53,6 +60,10 @@ In any phase,
   One generic flood fill (`Board.region`) works for
   chains, captures and territory.
 - `GoLean/Core/Sgf.lean` serializes a game to SGF FF[4] (Smart Game Format File Format 4)
+- `GoLean/Core/SgfParse.lean` parses SGF back into a game (`Sgf.load`),
+  validated by replaying every move through the rules engine, ensuring a loaded game
+  is legal-by-construction. It is also forgiving when real files need it (HA with no
+  AB, ko rules laxer than the engine's), with each case reported as a warning.
 - `GoLean/Protocol.lean` contains JSON DTOs. The wire state held by the client is
   the event log (config + actions), which is rebuilt server-side by folding `step`.
 - `GoLean/Widget.lean` + `GoLean/widget/goBoard.js` contains one RPC method and a
