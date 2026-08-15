@@ -37,7 +37,8 @@ def sgfEscape (str : String) : String :=
     if ch == ']' || ch == '\\' then (acc.push '\\').push ch else acc.push ch
 
 /-- The SGF `RU` (rules) value: a standard name when the toggles match a
-preset (komi aside), otherwise `Custom`. -/
+preset (komi aside), otherwise a parseable `Custom …` description so that
+export/import round trips preserve every toggle. -/
 def Ruleset.sgfName (rs : Ruleset) : String :=
   let same (a b : Ruleset) : Bool :=
     a.ko == b.ko && a.scoring == b.scoring
@@ -47,7 +48,10 @@ def Ruleset.sgfName (rs : Ruleset) : String :=
   else if same rs .chinese then "Chinese"
   else if same rs .trompTaylor then "Tromp-Taylor"
   else if same rs .aga then "AGA"
-  else "Custom"
+  else
+    s!"Custom ko={rs.ko.wireName} scoring={rs.scoring.wireName} " ++
+    s!"selfcapture={if rs.selfCaptureAllowed then "yes" else "no"} " ++
+    s!"passes={rs.passesToScore}"
 
 private def sgfProp (key val : String) : String := s!"{key}[{val}]"
 
@@ -68,14 +72,22 @@ def Game.toSgf (g : Game) : String :=
     | .finished _ r => sgfProp "RE" (if r.format == "Draw" then "0" else r.format)
     | _ => ""
   let haProp := if cfg.handicap ≥ 2 then sgfProp "HA" (toString cfg.handicap) else ""
-  -- Stones already on the initial board (fixed handicap) → AB setup.
-  let abProp :=
+  -- A forced first mover (SGF imports) is recorded as PL.
+  let plProp :=
+    match cfg.firstToMove with
+    | some .black => sgfProp "PL" "B"
+    | some .white => sgfProp "PL" "W"
+    | none => ""
+  -- Stones already on the initial board (handicap or explicit setup) → AB/AW.
+  let setupProps :=
     match cfg.initialPlayState with
     | .error _ => ""  -- unreachable: `g` was built from this config
     | .ok ps0 =>
-      let abPts := s.points.toList.filter fun p => ps0.board.get p == some Color.black
-      if abPts.isEmpty then ""
-      else "AB" ++ String.join (abPts.map fun p => s!"[{sgfCoord p.r.val p.c.val}]")
+      let mk (col : Color) (id : String) : String :=
+        let pts := s.points.toList.filter fun p => ps0.board.get p == some col
+        if pts.isEmpty then ""
+        else id ++ String.join (pts.map fun p => s!"[{sgfCoord p.r.val p.c.val}]")
+      mk .black "AB" ++ mk .white "AW"
   -- Replay the log; each `play`/`pass` becomes a move node colored by
   -- whoever was to move at that point.
   let moveNodes :=
@@ -101,7 +113,7 @@ def Game.toSgf (g : Game) : String :=
     ++ sgfProp "RU" cfg.ruleset.sgfName
     ++ sgfProp "PB" (sgfEscape cfg.blackName)
     ++ sgfProp "PW" (sgfEscape cfg.whiteName)
-    ++ haProp ++ reProp ++ abProp
+    ++ haProp ++ plProp ++ reProp ++ setupProps
     ++ moveNodes
     ++ ")"
 

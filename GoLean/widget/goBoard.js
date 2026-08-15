@@ -27,6 +27,7 @@ const DEFAULT_FORM = {
   handicap: 0, komi: 6.5,
   ko: 'simple', scoring: 'territory',
   selfCaptureAllowed: false, passesToScore: 2,
+  sgfText: '',
 };
 
 const COLORS = {
@@ -51,6 +52,9 @@ function formToConfig(f) {
     scoring: f.scoring,
     selfCaptureAllowed: !!f.selfCaptureAllowed,
     passesToScore: Math.max(1, Number(f.passesToScore) || 2),
+    setupBlack: [],
+    setupWhite: [],
+    firstToMove: '',
   };
 }
 
@@ -191,7 +195,7 @@ function labeled(label, input) {
     h('span', {}, label), input);
 }
 
-function SetupForm({ form, setForm, onStart, error, busy }) {
+function SetupForm({ form, setForm, onStart, onImport, error, busy }) {
   const set = (k) => (e) => {
     const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
     setForm((f) => ({ ...f, [k]: v }));
@@ -243,6 +247,16 @@ function SetupForm({ form, setForm, onStart, error, busy }) {
         labeled('Self-capture allowed',
           h('input', { type: 'checkbox', checked: form.selfCaptureAllowed, onChange: set('selfCaptureAllowed') })),
         labeled('Passes to end play', num('passesToScore', 1)))),
+    h('details', {},
+      h('summary', { style: { cursor: 'pointer', opacity: 0.85 } }, 'Load from SGF'),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.4em', paddingTop: '0.4em' } },
+        h('textarea', {
+          value: form.sgfText, onChange: set('sgfText'), rows: 5,
+          placeholder: '(;GM[1]FF[4]SZ[19]...;B[pd];W[dp]...)',
+          style: { width: '100%', fontFamily: 'monospace', boxSizing: 'border-box' },
+        }),
+        h('button', { onClick: onImport, disabled: busy, style: { padding: '0.3em', cursor: 'pointer' } },
+          busy ? 'Loading…' : 'Load SGF game'))),
     error ? h('div', { style: { color: COLORS.marker } }, error) : null,
     h('button', { onClick: onStart, disabled: busy, style: { padding: '0.35em', fontWeight: 'bold', cursor: 'pointer' } },
       busy ? 'Starting…' : 'Start game'));
@@ -250,9 +264,10 @@ function SetupForm({ form, setForm, onStart, error, busy }) {
 
 /* ---------------- main component ---------------- */
 
-export default function GoGame(_props) {
+export default function GoGame(props) {
   const rs = useRpcSession();
-  const [screen, setScreen] = React.useState('setup');
+  const initialGame = (props && props.game) ? props.game : null;
+  const [screen, setScreen] = React.useState(initialGame ? 'loading' : 'setup');
   const [form, setForm] = React.useState(DEFAULT_FORM);
   const [game, setGame] = React.useState(null);
   const [view, setView] = React.useState(null);
@@ -269,13 +284,29 @@ export default function GoGame(_props) {
     return () => clearTimeout(t);
   }, [toast]);
 
-  async function call(g, action, reviewAt) {
+  // A game handed over by `#go "file.sgf"` / `#go from …` loads on mount.
+  const loadedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!initialGame || loadedRef.current) return;
+    loadedRef.current = true;
+    (async () => {
+      const resp = await call(initialGame, null, null);
+      if (!resp) { setScreen('setup'); return; }
+      if (resp.error && !resp.view) { setSetupError(resp.error); setScreen('setup'); return; }
+      const warns = (props && props.warnings) || [];
+      if (warns.length) setToast(warns.join(' — '));
+      await openLoaded(resp, true);
+    })();
+  }, []);
+
+  async function call(g, action, reviewAt, importSgf) {
     setBusy(true);
     try {
       const resp = await rs.call('GoLean.update', {
         game: g,
         action: action || null,
         review: (reviewAt === undefined || reviewAt === null) ? null : reviewAt,
+        importSgf: (importSgf === undefined || importSgf === null) ? null : importSgf,
       });
       return resp;
     } catch (e) {
@@ -286,6 +317,22 @@ export default function GoGame(_props) {
     }
   }
 
+  /* Open a freshly created/loaded game; loaded games with moves open in
+   * review mode at move 0 (the natural way to study an imported record). */
+  async function openLoaded(resp, startInReview) {
+    setGame(resp.game);
+    if (resp.warning) setToast(resp.warning);
+    const total = resp.view ? resp.view.totalMoves : 0;
+    if (startInReview && total > 0) {
+      const r2 = await call(resp.game, null, 0);
+      if (r2 && r2.view) {
+        setView(r2.view); setReview(0); setScreen('game');
+        return;
+      }
+    }
+    setView(resp.view); setReview(null); setScreen('game');
+  }
+
   async function onStart() {
     setSetupError(null);
     const g0 = { config: formToConfig(form), actions: [] };
@@ -293,6 +340,17 @@ export default function GoGame(_props) {
     if (!resp) return;
     if (resp.error && !resp.view) { setSetupError(resp.error); return; }
     setGame(resp.game); setView(resp.view); setScreen('game');
+  }
+
+  async function onImportSgf() {
+    setSetupError(null);
+    const text = (form.sgfText || '').trim();
+    if (!text) { setSetupError('Paste an SGF string first.'); return; }
+    const dummy = { config: formToConfig(form), actions: [] };
+    const resp = await call(dummy, null, null, text);
+    if (!resp) return;
+    if (resp.error && !resp.view) { setSetupError(resp.error); return; }
+    await openLoaded(resp, true);
   }
 
   async function doAction(kind, r, c, who) {
@@ -354,8 +412,11 @@ export default function GoGame(_props) {
     setToast('SGF copied to clipboard — paste into a .sgf file.');
   }
 
+  if (screen === 'loading')
+    return h('div', { style: { padding: '0.5em' } }, 'Loading game…');
+
   if (screen === 'setup')
-    return h(SetupForm, { form, setForm, onStart, error: setupError, busy });
+    return h(SetupForm, { form, setForm, onStart, onImport: onImportSgf, error: setupError, busy });
 
   if (!view) return h('div', {}, 'Loading…');
 

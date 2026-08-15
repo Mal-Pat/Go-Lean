@@ -38,7 +38,8 @@ def sgfOf (eg : Except IllegalAction Game) : String :=
 #guard Ruleset.chinese.sgfName == "Chinese"
 #guard Ruleset.trompTaylor.sgfName == "Tromp-Taylor"
 #guard Ruleset.aga.sgfName == "AGA"
-#guard (Ruleset.sgfName { ko := .none }) == "Custom"
+#guard (Ruleset.sgfName { ko := .none })
+  == "Custom ko=none scoring=territory selfcapture=no passes=2"
 -- Komi alone must not make a preset "Custom" (it is stored separately).
 #guard (Ruleset.sgfName { defaultKomi2 := 99 }) == "Japanese"
 

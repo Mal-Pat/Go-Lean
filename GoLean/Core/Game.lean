@@ -25,6 +25,15 @@ structure GameConfig where
   /-- Twice the komi (`13` = 6.5). -/
   komi2 : Int := 13
   handicap : Nat := 0
+  /-- Explicit initial black stones `(row, col)`, e.g. an SGF's `AB` setup.
+  When either setup list is nonempty it overrides star-point handicap
+  placement (`handicap` is then only informational). -/
+  setupBlack : List (Nat × Nat) := []
+  /-- Explicit initial white stones `(row, col)`, e.g. an SGF's `AW` setup. -/
+  setupWhite : List (Nat × Nat) := []
+  /-- Force who moves first (used by SGF import). `none` = the convention:
+  White after handicap/black-only setup, otherwise Black. -/
+  firstToMove : Option Color := none
   blackName : String := "Black"
   whiteName : String := "White"
 
@@ -111,32 +120,61 @@ inductive Phase (s : Size) where
 /-- Reason for rejecting a `GameConfig`. -/
 inductive ConfigError where
   | badHandicap (max : Nat)
+  | setupOutOfBoard (r c : Nat)
+  | setupOverlap (r c : Nat)
   deriving DecidableEq, Repr
 
 def ConfigError.describe : ConfigError → String
   | .badHandicap max => s!"Handicap must be 0 or 2–{max} on this board."
+  | .setupOutOfBoard r c => s!"Setup stone at ({r}, {c}) is outside the board."
+  | .setupOverlap r c => s!"Two setup stones at ({r}, {c})."
 
 namespace GameConfig
 
-/-- The initial play state: empty board, or handicap stones placed
-(fixed placement on standard boards, free placement elsewhere). -/
+/-- The initial play state: empty board, explicit setup stones (SGF `AB`/`AW`),
+or handicap stones placed (fixed placement on standard boards, free
+placement elsewhere). `firstToMove` overrides the conventional first mover. -/
 def initialPlayState (cfg : GameConfig) : Except ConfigError (PlayState cfg.size) := do
-  if cfg.handicap ≤ 1 then
-    return PlayState.initial cfg.size
-  match cfg.size.fixedHandicapPoints cfg.handicap with
-  | some pts =>
-    -- Fixed placement: stones on star points, White moves first.
-    let b := pts.foldl (fun bd p => bd.set p (some Color.black)) (Board.empty cfg.size)
-    return { board := b, toMove := .white, history := #[(b, Color.white)] }
-  | none =>
-    if cfg.size.maxFixedHandicap != 0 then
-      -- Standard board, but the requested handicap is out of range.
-      throw (.badHandicap cfg.size.maxFixedHandicap)
-    else if cfg.handicap + 2 ≤ cfg.size.cells then
-      -- Nonstandard board: free placement, Black plays the stones herself.
-      return { PlayState.initial cfg.size with handicapLeft := cfg.handicap }
+  let base : PlayState cfg.size ←
+    if !cfg.setupBlack.isEmpty || !cfg.setupWhite.isEmpty then do
+      -- Explicit setup stones override star-point placement.
+      let place (bd : Board cfg.size) (col : Color) (rc : Nat × Nat) :
+          Except ConfigError (Board cfg.size) := do
+        match Point.ofNats? cfg.size rc.1 rc.2 with
+        | none => throw (.setupOutOfBoard rc.1 rc.2)
+        | some p =>
+          if (bd.get p).isSome then throw (.setupOverlap rc.1 rc.2)
+          else return bd.set p (some col)
+      let bd ← cfg.setupBlack.foldlM (fun b rc => place b .black rc) (Board.empty cfg.size)
+      let bd ← cfg.setupWhite.foldlM (fun b rc => place b .white rc) bd
+      -- Handicap convention: black-only setup means White moves first.
+      let first := if cfg.setupWhite.isEmpty then Color.white else Color.black
+      pure { board := bd, toMove := first, history := #[(bd, first)] }
+    else if cfg.handicap ≤ 1 then
+      pure (PlayState.initial cfg.size)
     else
-      throw (.badHandicap (cfg.size.cells - 2))
+      match cfg.size.fixedHandicapPoints cfg.handicap with
+      | some pts =>
+        -- Fixed placement: stones on star points, White moves first.
+        let b := pts.foldl (fun bd p => bd.set p (some Color.black)) (Board.empty cfg.size)
+        pure { board := b, toMove := .white, history := #[(b, Color.white)] }
+      | none =>
+        if cfg.size.maxFixedHandicap != 0 then
+          -- Standard board, but the requested handicap is out of range.
+          throw (.badHandicap cfg.size.maxFixedHandicap)
+        else if cfg.handicap + 2 ≤ cfg.size.cells then
+          -- Nonstandard board: free placement, Black plays the stones herself.
+          pure { PlayState.initial cfg.size with handicapLeft := cfg.handicap }
+        else
+          throw (.badHandicap (cfg.size.cells - 2))
+  match cfg.firstToMove with
+  | none => return base
+  | some col =>
+    if base.handicapLeft > 0 && col != .black then
+      -- Free-handicap placement is Black's; ignore an inconsistent override.
+      return base
+    else
+      return { base with toMove := col, history := #[(base.board, col)] }
 
 /-- One transition of the phase state (everything except `undo`,
 which is handled by `Game.step` because it rewinds the log). -/

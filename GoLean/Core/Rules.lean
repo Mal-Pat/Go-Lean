@@ -35,6 +35,20 @@ def KoRule.describe : KoRule → String
   | .situationalSuperko => "situational superko"
   | .none => "no ko rule"
 
+/-- Canonical short name, used on the wire and in SGF `RU` values. -/
+def KoRule.wireName : KoRule → String
+  | .simple => "simple"
+  | .positionalSuperko => "positional"
+  | .situationalSuperko => "situational"
+  | .none => "none"
+
+def KoRule.ofWireName? : String → Option KoRule
+  | "simple" => some .simple
+  | "positional" => some .positionalSuperko
+  | "situational" => some .situationalSuperko
+  | "none" => some .none
+  | _ => Option.none
+
 /-- `ScoringMethod` sets how the final position is scored. -/
 inductive ScoringMethod where
   /-- Japanese-style: territory + prisoners. -/
@@ -46,6 +60,14 @@ inductive ScoringMethod where
 def ScoringMethod.describe : ScoringMethod → String
   | .territory => "territory"
   | .area => "area"
+
+/-- Canonical short name, used on the wire and in SGF `RU` values. -/
+abbrev ScoringMethod.wireName : ScoringMethod → String := ScoringMethod.describe
+
+def ScoringMethod.ofWireName? : String → Option ScoringMethod
+  | "territory" => some .territory
+  | "area" => some .area
+  | _ => none
 
 /-- The full rule configuration of a game. -/
 structure Ruleset where

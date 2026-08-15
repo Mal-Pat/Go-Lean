@@ -5,6 +5,7 @@ Authors: Malhar A. Patel
 import Lean.Data.Json
 import GoLean.Core.Game
 import GoLean.Core.Sgf
+import GoLean.Core.SgfParse
 
 /-!
 # The RPC protocol layer
@@ -21,6 +22,12 @@ namespace GoLean
 
 open Lean (ToJson FromJson)
 
+/-- A bare board coordinate on the wire. -/
+structure PointDto where
+  r : Nat
+  c : Nat
+  deriving ToJson, FromJson, Inhabited, Repr
+
 /-- Wire form of `GameConfig` (+ the ruleset toggles, flattened). -/
 structure ConfigDto where
   rows : Nat := 19
@@ -36,6 +43,11 @@ structure ConfigDto where
   scoring : String := "territory"
   selfCaptureAllowed : Bool := false
   passesToScore : Nat := 2
+  /-- Explicit initial stones (SGF `AB`/`AW` imports); empty for UI games. -/
+  setupBlack : Array PointDto := #[]
+  setupWhite : Array PointDto := #[]
+  /-- `"" | "black" | "white"` — force who moves first (SGF imports). -/
+  firstToMove : String := ""
   deriving ToJson, FromJson, Inhabited, Repr
 
 /-- Wire form of `Action`. `r`/`c`/`who` are meaningful only for the kinds
@@ -120,6 +132,9 @@ structure UpdateRequest where
   The event log is left untouched — the client uses this to step back and
   forth through the game. -/
   review : Option Nat := none
+  /-- `some text`: ignore `game`/`action` and load `text` as an SGF game,
+  returning its wire state and view (or an error and no view). -/
+  importSgf : Option String := none
   deriving ToJson, FromJson, Inhabited
 
 /-- A rejected action returns the unchanged `game` plus `error`; the log
@@ -129,6 +144,8 @@ structure UpdateResponse where
   game : GameDto
   view : Option ViewDto := none
   error : Option String := none
+  /-- Non-fatal notes (e.g. forgiving-import policies that were applied). -/
+  warning : Option String := none
   deriving ToJson, FromJson, Inhabited
 
 /-! ## DTO → core conversions -/
@@ -155,12 +172,40 @@ def ConfigDto.toConfig (d : ConfigDto) : Except String GameConfig := do
   return { size
            komi2 := d.komi2
            handicap := d.handicap
+           setupBlack := d.setupBlack.toList.map fun p => (p.r, p.c)
+           setupWhite := d.setupWhite.toList.map fun p => (p.r, p.c)
+           firstToMove :=
+             match d.firstToMove with
+             | "black" => some .black
+             | "white" => some .white
+             | _ => none
            blackName := if d.blackName.isEmpty then "Black" else d.blackName
            whiteName := if d.whiteName.isEmpty then "White" else d.whiteName
            ruleset := { ko, scoring
                         selfCaptureAllowed := d.selfCaptureAllowed
                         defaultKomi2 := d.komi2
                         passesToScore := max 1 d.passesToScore } }
+
+/-- Wire form of a core config (used when the server, not the setup form,
+creates the game — e.g. SGF import). -/
+def GameConfig.toDto (cfg : GameConfig) : ConfigDto :=
+  { rows := cfg.size.rows
+    cols := cfg.size.cols
+    handicap := cfg.handicap
+    komi2 := cfg.komi2
+    blackName := cfg.blackName
+    whiteName := cfg.whiteName
+    ko := cfg.ruleset.ko.wireName
+    scoring := cfg.ruleset.scoring.wireName
+    selfCaptureAllowed := cfg.ruleset.selfCaptureAllowed
+    passesToScore := cfg.ruleset.passesToScore
+    setupBlack := cfg.setupBlack.toArray.map fun (r, c) => ⟨r, c⟩
+    setupWhite := cfg.setupWhite.toArray.map fun (r, c) => ⟨r, c⟩
+    firstToMove :=
+      match cfg.firstToMove with
+      | some .black => "black"
+      | some .white => "white"
+      | none => "" }
 
 def ActionDto.toAction (d : ActionDto) : Except String Action :=
   match d.kind with
@@ -314,10 +359,30 @@ def Game.toReviewView (g : Game) (k : Nat) : Option ViewDto := do
            scoreCard := none
            result := none }
 
-/-- Pure handler behind the RPC method: rebuild, then either return a
-read-only review view (`review = some k`) or optionally apply one action,
-returning the (possibly advanced) wire state plus the view. -/
+/-- Wire form of an SGF import result. -/
+def SgfImport.toGameDto (imp : SgfImport) : GameDto :=
+  { config := imp.config.toDto, actions := imp.moves.map Action.toDto }
+
+/-- Pure handler behind the RPC method: import an SGF, or rebuild and then
+either return a read-only review view (`review = some k`) or optionally
+apply one action, returning the (possibly advanced) wire state plus the
+view. -/
 def handleUpdate (req : UpdateRequest) : UpdateResponse :=
+  match req.importSgf with
+  | some text =>
+    match Sgf.load text with
+    | .error e => { game := req.game, error := some e }
+    | .ok imp =>
+      let gd := imp.toGameDto
+      match gd.build with
+      | .error e => { game := req.game, error := some s!"Imported game failed to replay: {e}" }
+      | .ok g =>
+        { game := gd
+          view := some g.toView
+          warning :=
+            if imp.warnings.isEmpty then none
+            else some (String.intercalate " · " imp.warnings) }
+  | none =>
   match req.game.build with
   | .error e => { game := req.game, error := some e }
   | .ok g =>
