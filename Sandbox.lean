@@ -1,25 +1,29 @@
 import GoLean
 
 /-!
-Open this file in VS Code (with the infoview visible) and put your cursor
-on the `#go` line below: the interactive Go board appears in the infoview.
-
-Set up the game (size, names, handicap, komi, ruleset presets + toggles).
-Click on the board to place stones or the buttons for pass/undo/resign.
-After two passes, click chains to mark them dead.
+Ensure the infoview is open, and put your cursor on the `#go` line.
+An interactive dashboard to set up a Go game will appear in the infoview.
+Set up the game, and then click on the "Start Game" button.
+Place stones by clicking on the board or pass/undo/resign using the buttons.
+After two passes, the game enters the "scoring" phase.
+Mark chains of stones as dead or alive by clicking on them.
 The game finishes when both players accept the score.
+Export the game in SGF or JSON format from the buttons below.
+Enter review mode by clicking on the "Review Game" button.
 -/
 
 #go
 
 /-!
-A game can also be pre-loaded from SGF — it opens in review mode so you
-can step through the moves (and continue playing via "Back to game"):
+A game can also be pre-loaded from SGF.
+It opens in review mode so you can step through the moves.
+You can continue playing via the "Back to game" button.
+
+There are three ways to do this:
 
 - from a file (path relative to this file): `#go "games/sample.sgf"`
 - from a string: `#go from "(;GM[1]FF[4]SZ[9];B[ee];W[cc])"`
-
-There is also a "Load from SGF" box on the setup screen for pasting.
+- from a string pasted in the "Load from SGF" box on the setup screen of `#go`
 -/
 
 #go "games/sample.sgf"
