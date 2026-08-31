@@ -52,11 +52,9 @@ def ofNats? (rows cols : Nat) : Option Size :=
 /-- Get the total number of intersections on a board of size `s`. -/
 abbrev cells (s : Size) : Nat := s.rows * s.cols
 
-theorem cols_pos (s : Size) : 0 < s.cols :=
-  Nat.lt_of_lt_of_le (by decide) s.cols_ge
+theorem cols_pos (s : Size) : 0 < s.cols := Nat.zero_lt_of_lt s.cols_ge
 
-theorem rows_pos (s : Size) : 0 < s.rows :=
-  Nat.lt_of_lt_of_le (by decide) s.rows_ge
+theorem rows_pos (s : Size) : 0 < s.rows := Nat.zero_lt_of_lt s.rows_ge
 
 end Size
 
