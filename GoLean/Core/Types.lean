@@ -94,11 +94,11 @@ def ofIdx {s : Size} (i : Fin s.cells) : Point s :=
 /-- The orthogonal neighbors of point `p`, which are in-bounds by construction. -/
 def neighbors {s : Size} (p : Point s) : Array (Point s) :=
   #[ if _h : 0 < p.r.val then
-       some ⟨⟨p.r.val - 1, by have := p.r.isLt; omega⟩, p.c⟩ else none,
+       some ⟨⟨p.r.val - 1, by omega⟩, p.c⟩ else none,
      if h : p.r.val + 1 < s.rows then
        some ⟨⟨p.r.val + 1, h⟩, p.c⟩ else none,
      if _h : 0 < p.c.val then
-       some ⟨p.r, ⟨p.c.val - 1, by have := p.c.isLt; omega⟩⟩ else none,
+       some ⟨p.r, ⟨p.c.val - 1, by omega⟩⟩ else none,
      if h : p.c.val + 1 < s.cols then
        some ⟨p.r, ⟨p.c.val + 1, h⟩⟩ else none
    ].filterMap id
