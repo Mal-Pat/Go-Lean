@@ -115,20 +115,20 @@ def points (s : Size) : Array (Point s) :=
 def starPoints (s : Size) : List (Point s) :=
   let mk (l : List (Nat × Nat)) : List (Point s) :=
     l.filterMap fun (r, c) => Point.ofNats? s r c
-  if s.rows == 9 && s.cols == 9 then
-    mk [(2, 2), (2, 6), (4, 4), (6, 2), (6, 6)]
-  else if s.rows == 13 && s.cols == 13 then
-    mk [(3, 3), (3, 9), (6, 6), (9, 3), (9, 9)]
-  else if s.rows == 19 && s.cols == 19 then
-    mk [(3, 3), (3, 9), (3, 15), (9, 3), (9, 9), (9, 15), (15, 3), (15, 9), (15, 15)]
-  else []
+  match s.rows, s.cols with
+  | 9, 9 => mk [(2, 2), (2, 6), (4, 4), (6, 2), (6, 6)]
+  | 13, 13 => mk [(3, 3), (3, 9), (6, 6), (9, 3), (9, 9)]
+  | 19, 19 => mk [(3, 3), (3, 9), (3, 15), (9, 3), (9, 9), (9, 15), (15, 3), (15, 9), (15, 15)]
+  | _, _ => []
 
 /-- Get the largest fixed handicap available on a board of size `s`
 (0 means fixed placement is unsupported; use free placement instead). -/
 def maxFixedHandicap (s : Size) : Nat :=
-  if s.rows == 9 && s.cols == 9 then 5
-  else if (s.rows == 13 && s.cols == 13) || (s.rows == 19 && s.cols == 19) then 9
-  else 0
+  match s.rows, s.cols with
+  | 9, 9 => 5
+  | 13, 13 => 9
+  | 19, 19 => 9
+  | _, _ => 0
 
 /-- Get the star points used for a fixed handicap of `n` stones, in the traditional
 order (upper right, lower left, lower right, upper left, sides, center).
