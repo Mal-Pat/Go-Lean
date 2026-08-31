@@ -80,11 +80,8 @@ def ofNats? (s : Size) (r c : Nat) : Option (Point s) :=
 
 /-- Get the flat index of a point (row-major) `p`. -/
 def idx {s : Size} (p : Point s) : Fin s.cells :=
-  ⟨p.r.val * s.cols + p.c.val, by
-    calc p.r.val * s.cols + p.c.val
-        < p.r.val * s.cols + s.cols := Nat.add_lt_add_left p.c.isLt _
-      _ = (p.r.val + 1) * s.cols := (Nat.succ_mul _ _).symm
-      _ ≤ s.rows * s.cols := Nat.mul_le_mul_right _ p.r.isLt⟩
+  ⟨p.r.val * s.cols + p.c.val, trans (trans (Nat.add_lt_add_left p.c.isLt _)
+    (Nat.succ_mul ..).symm) (Nat.mul_le_mul_right _ p.r.isLt)⟩
 
 /-- Get the point from a flat index (row-major) `i`. -/
 def ofIdx {s : Size} (i : Fin s.cells) : Point s :=
